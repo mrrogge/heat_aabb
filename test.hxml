@@ -1,0 +1,7 @@
+--class-path src
+--class-path test
+-L tink_core
+-L heat_event
+-L heat_core
+--main Main
+--interp
