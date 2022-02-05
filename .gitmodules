@@ -1,0 +1,4 @@
+[submodule "heat_ecs"]
+	path = heat_ecs
+	url = https://github.com/mrrogge/heat_ecs
+	branch = next
