@@ -1,0 +1,4 @@
+# @install: lix --silent download "gh://github.com/mrrogge/heat_core#99144dff16369be61f62ddb23b727eaca64fad2b" into heat_core/0.1.1/github/99144dff16369be61f62ddb23b727eaca64fad2b
+-cp ${HAXE_LIBCACHE}/heat_core/0.1.1/github/99144dff16369be61f62ddb23b727eaca64fad2b/src
+-D heat_core=0.1.1
+--macro heat.core.macro.TupleBuilder.buildTuplesUpTo(5)

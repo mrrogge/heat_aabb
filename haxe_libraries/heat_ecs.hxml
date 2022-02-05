@@ -1,0 +1,4 @@
+# @install: lix --silent download "gh://github.com/mrrogge/heat_ecs#c9f9805bf6d906e9df9641484d36b8b19e1f71ca" into heat_ecs/0.1.1/github/c9f9805bf6d906e9df9641484d36b8b19e1f71ca
+# -cp ${HAXE_LIBCACHE}/heat_ecs/0.1.1/github/c9f9805bf6d906e9df9641484d36b8b19e1f71ca/src
+-cp ./heat_ecs/src
+-D heat_ecs=0.1.1
