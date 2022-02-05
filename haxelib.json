@@ -1,0 +1,12 @@
+{
+  "name": "heat_aabb",
+  "description": "An axis-aligned bounding box (AABB) collision detection solution",
+  "url" : "https://github.com/mrrogge/heat_aabb",
+  "license": "MIT",
+  "tags": [],
+  "version": "0.1.1",
+  "releasenote": "",
+  "contributors": ["mrrogge"],
+  "dependencies": {},
+  "classPath": "src"
+}
