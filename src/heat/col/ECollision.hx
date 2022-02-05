@@ -1,10 +1,13 @@
 package heat.col;
 
+import heat.ecs.*;
+import heat.vector.*;
+
 typedef ECollision = {
     final id1:heat.ecs.EntityId;
     final id2:heat.ecs.EntityId;
-    final normal1:heat.vector.FloatVector2;
-    final normal2:heat.vector.FloatVector2;
+    final normal1:MVector2<Float>;
+    final normal2:MVector2<Float>;
     final dx1:Float;
     final dx2:Float;
     final dy1:Float;

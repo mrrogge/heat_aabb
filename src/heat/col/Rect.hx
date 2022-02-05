@@ -1,5 +1,7 @@
 package heat.col;
 
+import heat.vector.*;
+
 class Rect {
     public var x(default, null):Float;
     public var y(default, null):Float;

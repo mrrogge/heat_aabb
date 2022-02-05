@@ -1,4 +1,4 @@
-package heat;
+package heat.pool;
 
 /**
     A generic object pool.
