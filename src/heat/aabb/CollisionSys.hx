@@ -274,8 +274,8 @@ class CollisionSys {
         rectPool.put(newRect);
     }
 
-    public function getNearestCorner(rect:MRect, x:Float, y:Float, ?dest:MVector2<Float>):MVector2<Float> {
-        if (dest == null) dest = new MVector2<Float>();
+    public function getNearestCorner(rect:MRect, x:Float, y:Float, ?dest:MFloatVector2):MFloatVector2 {
+        if (dest == null) dest = new MFloatVector2();
         dest.x = Math.abs(rect.x - x) < Math.abs(rect.x + rect.w - x) ? rect.x : rect.x + rect.w;
         dest.y = Math.abs(rect.y - y) < Math.abs(rect.y + rect.h - y) ? rect.y : rect.y + rect.h;
         return dest;
@@ -339,11 +339,11 @@ class CollisionSys {
                     }
                     if (checkedIds[id2]) continue;
                     if (!filter(id1, id2)) continue;
-                    var dv1 = new MVector2<Float>(currentRects[id1].x - prevRects[id1].x,
+                    var dv1 = new MFloatVector2(currentRects[id1].x - prevRects[id1].x,
                         currentRects[id1].y - prevRects[id1].y);
-                    var dv2 = new MVector2<Float>(currentRects[id2].x - prevRects[id2].x,
+                    var dv2 = new MFloatVector2(currentRects[id2].x - prevRects[id2].x,
                         currentRects[id2].y - prevRects[id2].y);
-                    var dv = new MVector2<Float>(dv1.x-dv2.x, dv1.y-dv2.y);
+                    var dv = new MFloatVector2(dv1.x-dv2.x, dv1.y-dv2.y);
                     var line = new Line(0, 0, dv.x, dv.y);
                     var rectDiff = diffRects(prevRects[id1], prevRects[id2]);
                     if (rectDiff.containsPoint(0, 0)) {
@@ -355,8 +355,8 @@ class CollisionSys {
                             Math.abs(nearestCornerToOrigin.y));
                         if (dv.x == 0 && dv.y == 0) {
                             //not moving relative to each other. Separate by finding the shortest displacement vector
-                            var n1 = new MVector2<Float>();
-                            var n2 = new MVector2<Float>();
+                            var n1 = new MFloatVector2();
+                            var n2 = new MFloatVector2();
                             var separateX1 = -dv1.x;
                             var separateY1 = -dv1.y;
                             var separateX2 = -dv2.x;
@@ -408,10 +408,10 @@ class CollisionSys {
                                     if (ti1 < 1 
                                     && (0 < ti1 + EPSILON || (ti1 == 0 && ti2 > 0)))
                                     {
-                                        var normal1 = new MVector2<Float>();
+                                        var normal1 = new MFloatVector2();
                                         normal1.x = intersection.nx1;
                                         normal1.y = intersection.ny1;
-                                        var normal2 = new MVector2<Float>();
+                                        var normal2 = new MFloatVector2();
                                         normal2.x = -normal1.x;
                                         normal2.y = -normal1.y;
                                         var separateX1 = 0.;
@@ -475,10 +475,10 @@ class CollisionSys {
                                 if (ti1 < 1 
                                 && (0 < ti1 + EPSILON || (ti1 == 0 && ti2 > 0)))
                                 {
-                                    var normal1 = new MVector2<Float>();
+                                    var normal1 = new MFloatVector2();
                                     normal1.x = intersection.nx1;
                                     normal1.y = intersection.ny1;
-                                    var normal2 = new MVector2<Float>();
+                                    var normal2 = new MFloatVector2();
                                     normal2.x = -normal1.x;
                                     normal2.y = -normal1.y;
                                     var separateX1 = 0.;

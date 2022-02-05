@@ -7,12 +7,12 @@ package heat.aabb;
 **/
 class Collidable {
     public var rect(default, null):MRect;
-    public var offset(default, null):heat.vector.MVector2<Float>;
+    public var offset(default, null):heat.vector.MFloatVector2;
     public var movable = true;
 
     public function new() {
         rect = new MRect();
-        offset = new heat.vector.MVector2<Float>();
+        offset = new heat.vector.MFloatVector2();
     }
 
     public function setPos(x:Float, y:Float):Collidable {
