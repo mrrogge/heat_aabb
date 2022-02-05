@@ -1,4 +1,4 @@
-package heat.col;
+package heat.aabb;
 
 /**
     Defines an area that an entity occupies in space. Note that this is distinct from the rendered size and can be different.

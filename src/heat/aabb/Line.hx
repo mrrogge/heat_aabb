@@ -1,4 +1,4 @@
-package heat.col;
+package heat.aabb;
 
 import heat.vector.*;
 

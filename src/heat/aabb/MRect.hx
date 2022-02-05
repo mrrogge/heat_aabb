@@ -1,4 +1,4 @@
-package heat.col;
+package heat.aabb;
 
 class MRect {
     public var x:Float;
