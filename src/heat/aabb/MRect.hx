@@ -28,7 +28,15 @@ class MRect {
     }
 
     public function containsPoint(x:Float, y:Float, tol=1e-7):Bool {
-        return x-this.x > tol && y-this.y > tol && this.x+this.w-x > tol 
-            && this.y+this.h-y > tol;
+        return x-this.x >= tol && y-this.y >= tol && this.x+this.w-x >= tol 
+            && this.y+this.h-y >= tol;
+    }
+
+    public function clone():MRect {
+        return new MRect(this.x, this.y, this.w, this.h);
+    }
+
+    public function toString():String {
+        return 'MRect{${this.x}, ${this.y}, ${this.w}, ${this.h}}';
     }
 }
