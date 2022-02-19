@@ -329,6 +329,7 @@ class CollisionSys {
 
         for (id1 in query.result) {
             var collidable1 = collidables[id1];
+            if (collidable1.isStatic) continue;
             var currentRect1 = normalizeRectFromCollidable(collidable1);
             getContainingRect(prevRects[id1], currentRect1, update_movedRect);
             getCellsInRect(update_movedRect, cellsArray);

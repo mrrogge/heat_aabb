@@ -9,6 +9,7 @@ class Collidable {
     public var rect(default, null):MRect;
     public var offset(default, null):heat.vector.MFloatVector2;
     public var movable = true;
+    public var isStatic = false;
 
     public function new() {
         rect = new MRect();
