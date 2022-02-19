@@ -32,28 +32,43 @@ private typedef RectLineIntersection = {
 }
 
 class CollisionSys {
+    //tolerance for collisions
     public static inline final EPSILON = 1e-7;
+    // public static inline final EPSILON = 0;
 
+    //signal for when collisions are detected
     public var collisionSignal(default, null):heat.event.ISignal<ECollision>;
 
-    //emitters for the protected signals
+    //private emitter for collision signal
     var collisionEmitter = new heat.event.SignalEmitter<ECollision>();
 
+    //query for all collidables
     var query = new heat.ecs.ComQuery();
 
+    //collidable map
     var collidables:heat.ecs.ComMap<Collidable>;
 
+    //x/y dimension of each cell in spatial hash
     var cellSize:Int;
+
+    //container for all cell instances
     var cells = new Map<Int, Map<Int, Cell>>();
 
-    var prevRects = new Map<EntityId, MRect>();
-    var currentRects = new Map<EntityId, MRect>();
-    var idCellsMap = new Map<EntityId, Array<Cell>>();
-    var containingRect = new MRect();
+    //holds collidable data for each entity from the previous frame
+    public var prevRects = new Map<EntityId, MRect>();
+
+    //pre-allocated map of IDs for performance purposes
     var checkedIds = new Map<EntityId, Bool>();
+    //pre-allocated array of cells for performance purposes
     var cellsArray = new Array<Cell>();
 
+    //pool used for managing internal rect instances
     var rectPool:Pool<MRect>;
+
+    //pool used for managing internal vector instances
+    var vectorPool:Pool<MFloatVector2>;
+
+    var intersectionPool:Pool<RectLineIntersection>;
 
     public function new(collidables:heat.ecs.ComMap<Collidable>, cellSize=64) {
         this.collidables = collidables;
@@ -63,8 +78,13 @@ class CollisionSys {
         rectPool = new Pool<MRect>(()->{
             return new MRect();
         });
+        vectorPool = new Pool<MFloatVector2>(()->{
+            return new MFloatVector2();
+        });
+
     }
 
+    //A filter for detecting valid collisions; return true if the ids can collide, otherwise false.
     public dynamic function filter(id1:EntityId, id2:EntityId):Bool {
         return true;
     }
@@ -93,30 +113,44 @@ class CollisionSys {
 
     /**
         Returns the Cell containing the point defined by x and y. If that cell doesn't exist yet, this method automatically initializes it.
-    **/
-    function pointToCell(x:Float, y:Float):Cell {
-        return getCell(Math.floor(x/cellSize), Math.floor(y/cellSize));
-    }
 
+        Cells are lower-bound-inclusive and upper-bound-exclusive.
+
+        NOTE: this may need to be adjusted to include all cells touching the point, investigation needed
+    **/
+    function pointToCells(x:Float, y:Float, dest:Array<Cell>):Array<Cell> {
+        while (dest.length > 0) dest.pop();
+        dest.push(getCell(Math.floor(x/cellSize), Math.floor(y/cellSize)));
+        var cell = getCell(Math.floor(x/cellSize), Math.ceil(y/cellSize));
+        if (!dest.contains(cell)) dest.push(cell);
+        cell = getCell(Math.ceil(x/cellSize), Math.floor(y/cellSize));
+        if (!dest.contains(cell)) dest.push(cell);
+        cell = getCell(Math.ceil(x/cellSize), Math.ceil(y/cellSize));
+        if (!dest.contains(cell)) dest.push(cell);
+        return dest;
+    }
 
     /**
         Finds all cells overlapping rect and returns them in an array.
     **/
+    var workingCellArray = new Array<Cell>();
     function getCellsInRect(rect:MRect, ?dest:Array<Cell>):Array<Cell> {
         if (dest == null) dest = new Array<Cell>();
         else {
             for (i in 0...dest.length) dest.pop();
         }
-        var topLeftCell = pointToCell(rect.x, rect.y);
-        var bottomRightCell = pointToCell(rect.x+rect.w, rect.y+rect.h);
-        dest.push(topLeftCell);
+        pointToCells(rect.x, rect.y, dest);
+        var topLeftCell = dest[0];
+        pointToCells(rect.x + rect.w, rect.y + rect.h, workingCellArray);
+        var bottomRightCell = workingCellArray[workingCellArray.length-1];
+        for (cell in workingCellArray) {
+            if (!dest.contains(cell)) dest.push(cell);
+        }
         if (topLeftCell != bottomRightCell) {
-            dest.push(bottomRightCell);
             for (row in topLeftCell.row...bottomRightCell.row+1) {
                 for (col in topLeftCell.col...bottomRightCell.col+1) {
-                    if (row == topLeftCell.row && col == topLeftCell.col) continue;
-                    if (row == bottomRightCell.row && col == bottomRightCell.col) continue;
-                    dest.push(getCell(row, col));
+                    var cell = getCell(row, col);
+                    if (!dest.contains(cell)) dest.push(cell);
                 }
             }
         }
@@ -137,7 +171,7 @@ class CollisionSys {
 
     function diffRects(r1:MRect, r2:MRect, ?dest:MRect):MRect {
         if (dest == null) dest = new MRect();
-        dest.init(r2.x - r1.x - r1.w, r2.y - r1.y - r1.h, r1.w+r2.w, r1.h+r2.h);
+        dest.init(r1.x - r2.x - r2.w, r1.y - r2.y - r2.h, r1.w+r2.w, r1.h+r2.h);
         return dest;
     }
 
@@ -218,196 +252,180 @@ class CollisionSys {
     function normalizeRectFromCollidable(collidable:Collidable, ?destRect:MRect)
     :MRect {
         if (destRect == null) destRect = rectPool.get();
-        destRect.x = collidable.rect.x - collidable.offset.x;
-        destRect.y = collidable.rect.y - collidable.offset.y;
+        destRect.x = collidable.rect.x + collidable.offset.x;
+        destRect.y = collidable.rect.y + collidable.offset.y;
         destRect.w = collidable.rect.w;
         destRect.h = collidable.rect.h;
         return destRect;
     }
 
-    function updateRectsAfterCollision(event:ECollision) {
-        var collidable1 = collidables[event.id1];
-        if (collidable1 == null) return;
-        var collidable2 = collidables[event.id2];
-        if (collidable2 == null) return;
-
-        var newRect = normalizeRectFromCollidable(collidable1);
-        if (!currentRects.exists(event.id1)) {
-            currentRects[event.id1] = rectPool.get().init();
-        }
-        if(!MRect.isAlike(newRect, currentRects[event.id1])) {
-            //id1 has changed due to a collision response
-            getContainingRect(prevRects[event.id1], currentRects[event.id1],
-                containingRect);
-            getCellsInRect(containingRect, cellsArray);
-            for (cell in cellsArray) {
-                cell.ids.remove(event.id1);
-            }
-            currentRects[event.id1].pullFrom(newRect);
-            getContainingRect(prevRects[event.id1], currentRects[event.id1],
-                containingRect);
-            getCellsInRect(containingRect, cellsArray);
-            for (cell in cellsArray) {
-                cell.ids[event.id1] = true;
-            }
-        }
-        normalizeRectFromCollidable(collidable2, newRect);
-        if (!currentRects.exists(event.id2)) {
-            currentRects[event.id2] = rectPool.get().init();
-        }
-        if(!MRect.isAlike(newRect, currentRects[event.id2])) {
-            //id2 has changed due to a collision response
-            getContainingRect(prevRects[event.id2], currentRects[event.id2],
-                containingRect);
-            getCellsInRect(containingRect, cellsArray);
-            for (cell in cellsArray) {
-                cell.ids.remove(event.id2);
-            }
-            currentRects[event.id2].pullFrom(newRect);
-            getContainingRect(prevRects[event.id2], currentRects[event.id2],
-                containingRect);
-            getCellsInRect(containingRect, cellsArray);
-            for (cell in cellsArray) {
-                cell.ids[event.id2] = true;
-            }
-        }
-        rectPool.put(newRect);
-    }
-
     public function getNearestCorner(rect:MRect, x:Float, y:Float, ?dest:MFloatVector2):MFloatVector2 {
-        if (dest == null) dest = new MFloatVector2();
+        if (dest == null) dest = vectorPool.get();
         dest.x = Math.abs(rect.x - x) < Math.abs(rect.x + rect.w - x) ? rect.x : rect.x + rect.w;
         dest.y = Math.abs(rect.y - y) < Math.abs(rect.y + rect.h - y) ? rect.y : rect.y + rect.h;
         return dest;
     }
 
+    /**
+     * Sets the previous rect to the current collidable.
+     * @param id 
+     */
+    var syncPrev_workingRect2 = new MRect();
+    function syncPrev(id:EntityId, workingRect:MRect) {
+        //remove from cells
+        var collidable = collidables[id];
+        normalizeRectFromCollidable(collidable, workingRect);
+        if (!prevRects.exists(id)) {
+            prevRects[id] = workingRect.clone();
+        }
+        getContainingRect(prevRects[id], workingRect, syncPrev_workingRect2);
+        getCellsInRect(syncPrev_workingRect2, cellsArray);
+        for (cell in cellsArray) {
+            cell.ids.remove(id);
+        }
+        prevRects[id].pullFrom(workingRect);
+        //add to cells
+        getCellsInRect(prevRects[id], cellsArray);
+        for (cell in cellsArray) {
+            cell.ids[id] = true;
+        }
+    }
+
+    /**
+     * Updates the internal rects for each entity to the current collidable positions. 
+     * 
+     * This is useful for when entities move in the world but their displacement should not be handled by the collision system, e.g. teleporting. Without calling this method, the system will assume any change in position since the last frame should have collisions processed.
+     */
+    public function syncAll() {
+        query.run();
+        var rect = rectPool.get();
+        for (id in query.result) {
+            syncPrev(id, rect);
+        }
+        rectPool.put(rect);
+    }
+
+    var update_currentRect = new MRect();
+    var update_movedRect = new MRect();
+    var update_dv1 = new MFloatVector2();
+    var update_dv2 = new MFloatVector2();
+    var update_dv = new MFloatVector2();
+    var update_line = new Line();
+    var update_rectDiff = new MRect();
     public function update(dt:Float) {
         query.run();
         for (id in query.result) {
             var collidable = collidables[id];
-            if (prevRects.exists(id) && currentRects.exists(id)) {
-                //remove id from previous cells
-                getContainingRect(prevRects[id], currentRects[id],
-                    containingRect);
-                getCellsInRect(containingRect, cellsArray);
-                for (cell in cellsArray) {
-                    cell.ids.remove(id);
-                }
-                prevRects[id].pullFrom(currentRects[id]);
-                normalizeRectFromCollidable(collidable, currentRects[id]);
-                getContainingRect(prevRects[id], currentRects[id],
-                    containingRect);
+            normalizeRectFromCollidable(collidable, update_currentRect);
+            if (!prevRects.exists(id)) {
+                prevRects[id] = update_currentRect.clone();
             }
-            else {
-                if (!prevRects.exists(id)) prevRects[id] = rectPool.get().init();
-                if (!currentRects.exists(id)) currentRects[id] = rectPool.get().init();
-                normalizeRectFromCollidable(collidable, currentRects[id]);
-                prevRects[id].pullFrom(currentRects[id]);
-                containingRect.pullFrom(currentRects[id]);
-            }
-            if (Math.abs(prevRects[id].w-currentRects[id].w) > EPSILON
-            || Math.abs(prevRects[id].h-currentRects[id].h) > EPSILON) 
-            {
-                //collider has changed this frame. Instead of trying to figure out collisions while gradually resizing (which would likely require some complex integration), we will just act as the though the size changed immediately before the move, i.e. previous size is still equal to current size.
-                //NOTE: technically there's still an issue here since the previous origin point might be something other than the top-left corner, but because we aren't storing that info we don't know what it is, so we're just keeping it simple and resizing based on the top-left corner position. We would need to store more info from the previous frame in order to fix this, but it's not really that important right now.
-                prevRects[id].w = currentRects[id].w;
-                prevRects[id].h = currentRects[id].h;
-            }
-            getCellsInRect(containingRect, cellsArray);
+            getContainingRect(update_currentRect, prevRects[id], update_movedRect);
+            getCellsInRect(update_movedRect, cellsArray);
             for (cell in cellsArray) {
                 cell.ids[id] = true;
             }
         }
-        checkedIds.clear();
+
         for (id1 in query.result) {
-            checkedIds[id1] = true;
             var collidable1 = collidables[id1];
-            if (collidable1 == null) continue;
-            getContainingRect(prevRects[id1], currentRects[id1], containingRect);
-            getCellsInRect(containingRect, cellsArray);
+            var currentRect1 = normalizeRectFromCollidable(collidable1);
+            getContainingRect(prevRects[id1], currentRect1, update_movedRect);
+            getCellsInRect(update_movedRect, cellsArray);
             for (cell in cellsArray) {
-                for (id2 => val in cell.ids) {
+                for (id2 => _ in cell.ids) {
                     if (id1 == id2) continue;
-                    var id2HasAllComs = true;
                     var collidable2 = collidables[id2];
-                    if (collidable2 == null) id2HasAllComs = false;
-                    if (!id2HasAllComs) {
+                    if (collidable2 == null) {
                         cell.ids.remove(id2);
                         prevRects.remove(id2);
-                        currentRects.remove(id2);
                         continue;
                     }
-                    if (checkedIds[id2]) continue;
                     if (!filter(id1, id2)) continue;
-                    var dv1 = new MFloatVector2(currentRects[id1].x - prevRects[id1].x,
-                        currentRects[id1].y - prevRects[id1].y);
-                    var dv2 = new MFloatVector2(currentRects[id2].x - prevRects[id2].x,
-                        currentRects[id2].y - prevRects[id2].y);
-                    var dv = new MFloatVector2(dv1.x-dv2.x, dv1.y-dv2.y);
-                    var line = new Line(0, 0, dv.x, dv.y);
-                    var rectDiff = diffRects(prevRects[id1], prevRects[id2]);
-                    if (rectDiff.containsPoint(0, 0)) {
+                    var currentRect2 = normalizeRectFromCollidable(collidable2);
+                    update_dv1.init(
+                        currentRect1.x - prevRects[id1].x,
+                        currentRect1.y - prevRects[id1].y);
+                    update_dv2.init(
+                        currentRect2.x - prevRects[id2].x,
+                        currentRect2.y - prevRects[id2].y);
+                    //dv is how far id2 has moved from id1's frame of reference
+                    update_dv.init(update_dv1.x-update_dv2.x, update_dv1.y-update_dv2.y);
+                    //line is from the origin out in dv direction
+                    update_line.init(0, 0, -update_dv.x, -update_dv.y);
+                    //rectDiff is Minkowski diff of prev collidables. This tells us if they were overlapping already or not
+                    diffRects(prevRects[id1], prevRects[id2], update_rectDiff);
+                    var prevRect1 = prevRects[id1];
+                    var prevRect2 = prevRects[id2];
+                    if (update_rectDiff.containsPoint(0, 0)) {
                         //was already overlapping
-                        var nearestCornerToOrigin = getNearestCorner(rectDiff, 0, 0);
+                        var nearestCornerToOrigin = getNearestCorner(update_rectDiff, 0, 0);
                         var intersectionWidth = Math.min(collidable1.rect.w, 
                             Math.abs(nearestCornerToOrigin.x));
                         var intersectionHeight = Math.min(collidable1.rect.h,
                             Math.abs(nearestCornerToOrigin.y));
-                        if (dv.x == 0 && dv.y == 0) {
+                        //Check if they are moving relative to each other or not
+                        if (update_dv.x == 0 && update_dv.y == 0) {
                             //not moving relative to each other. Separate by finding the shortest displacement vector
                             var n1 = new MFloatVector2();
                             var n2 = new MFloatVector2();
-                            var separateX1 = -dv1.x;
-                            var separateY1 = -dv1.y;
-                            var separateX2 = -dv2.x;
-                            var separateY2 = -dv2.y;
+                            var separateX1 = -update_dv1.x;
+                            var separateY1 = -update_dv1.y;
+                            var separateX2 = -update_dv2.x;
+                            var separateY2 = -update_dv2.y;
                             if (Math.abs(nearestCornerToOrigin.x) < Math.abs(nearestCornerToOrigin.y)) {
                                 n1.x = nearestCornerToOrigin.x/Math.abs(nearestCornerToOrigin.x);
                                 n1.y = 0;
                                 n2.x = -n1.x;
                                 n2.y = 0;
-                                separateX1 += nearestCornerToOrigin.x;
-                                separateX2 -= nearestCornerToOrigin.x;
+                                separateX1 -= nearestCornerToOrigin.x;
+                                separateX2 += nearestCornerToOrigin.x;
                             }
                             else {
                                 n1.x = 0;
                                 n1.y = nearestCornerToOrigin.y/Math.abs(nearestCornerToOrigin.y);
                                 n2.x = 0;
                                 n2.y = -n1.y;
-                                separateY1 += nearestCornerToOrigin.y;
-                                separateY2 -= nearestCornerToOrigin.y; 
+                                separateY1 -= nearestCornerToOrigin.y;
+                                separateY2 += nearestCornerToOrigin.y; 
                             }
                             if (Math.abs(separateX1) < EPSILON) separateX1 = 0;
                             if (Math.abs(separateX2) < EPSILON) separateX2 = 0;
                             if (Math.abs(separateY1) < EPSILON) separateY1 = 0;
                             if (Math.abs(separateY2) < EPSILON) separateY2 = 0;
+                            if (Math.abs(separateX1) > 32 
+                            || Math.abs(separateX2) > 32 
+                            || Math.abs(separateY1) > 32
+                            || Math.abs(separateY2) > 32) 
+                            {
+                                trace('big move');
+                            }
                             var event:ECollision = {
                                 id1: id1,
                                 id2: id2,
                                 normal1: n1,
                                 normal2: n2,
-                                dx1: dv1.x,
-                                dy1: dv1.y,
-                                dx2: dv2.x,
-                                dy2: dv2.y,
+                                dx1: update_dv1.x,
+                                dy1: update_dv1.y,
+                                dx2: update_dv2.x,
+                                dy2: update_dv2.y,
                                 separateX1: separateX1,
                                 separateY1: separateY1,
                                 separateX2: separateX2,
-                                separateY2: separateY2 
+                                separateY2: separateY2
                             };
                             collisionEmitter.emit(event);
-                            updateRectsAfterCollision(event);
+                            syncPrev(id1, update_currentRect);
+                            syncPrev(id2, update_currentRect);
                         }
                         else {
                             //moving relative to each other. Separate along dv line, away from each other.
-                            var intersection = getRectLineIntersection(rectDiff, line, Math.NEGATIVE_INFINITY, 1);
+                            var intersection = getRectLineIntersection(update_rectDiff, update_line, Math.NEGATIVE_INFINITY, 1);
                             switch intersection {
                                 case Some(intersection): {
                                     final ti1 = intersection.ti1;
                                     final ti2 = intersection.ti2;
-                                    if (ti1 < 1 
-                                    && (0 < ti1 + EPSILON || (ti1 == 0 && ti2 > 0)))
-                                    {
+                                    if (ti1 < 1) {
                                         var normal1 = new MFloatVector2();
                                         normal1.x = intersection.nx1;
                                         normal1.y = intersection.ny1;
@@ -418,46 +436,54 @@ class CollisionSys {
                                         var separateX2 = 0.;
                                         var separateY1 = 0.;
                                         var separateY2 = 0.;
-                                        if ((dv1.x > 0 && normal1.x < 0) 
-                                        || (dv1.x < 0 && normal1.x > 0)) 
-                                        {
-                                            separateX1 = -dv1.x + line.x2 * intersection.ti1;
-                                        }
-                                        if ((dv2.x > 0 && normal2.x < 0) 
-                                        || (dv2.x < 0 && normal2.x > 0)) 
-                                        {
-                                            separateX2 = -dv2.x - line.x2 * intersection.ti1;
-                                        }
-                                        if ((dv1.y > 0 && normal1.y < 0) 
-                                        || (dv1.y < 0 && normal1.y > 0)) 
-                                        {
-                                            separateY1 = -dv1.y + line.y2 * intersection.ti1;
-                                        }
-                                        if ((dv2.y > 0 && normal2.y < 0) 
-                                        || (dv2.y < 0 && normal2.y > 0)) 
-                                        {
-                                            separateY2 = -dv2.y - line.y2 * intersection.ti1;
-                                        }
+                                        separateX1 = update_dv1.x * -intersection.ti1;
+                                        separateX2 = update_dv2.x * intersection.ti1;
+                                        separateY1 = update_dv1.y * -intersection.ti1;
+                                        separateY2 = update_dv2.y * intersection.ti1;
+                                        // if (normal1.x != 0) {
+                                        //     separateX1 = update_dv1.x * -intersection.ti1;
+                                        //     separateX2 = update_dv2.x * intersection.ti1;
+                                        //     // separateX1 = -update_dv1.x - update_line.x2 * intersection.ti1;
+                                        //     // separateX2 = -update_dv2.x + update_line.x2 * intersection.ti1;
+                                        //     separateY1 = 0;
+                                        //     separateY2 = 0;
+                                        // }
+                                        // else if (normal1.y != 0) {
+                                        //     separateX1 = 0;
+                                        //     separateX2 = 0;
+                                        //     separateY1 = update_dv1.y * -intersection.ti1;
+                                        //     separateY2 = update_dv2.y * intersection.ti1;
+                                        //     // separateY1 = -update_dv1.y - update_line.y2 * intersection.ti1;
+                                        //     // separateY2 = -update_dv2.y + update_line.y2 * intersection.ti1;
+                                        // }
                                         if (Math.abs(separateX1) < EPSILON) separateX1 = 0;
                                         if (Math.abs(separateX2) < EPSILON) separateX2 = 0;
                                         if (Math.abs(separateY1) < EPSILON) separateY1 = 0;
                                         if (Math.abs(separateY2) < EPSILON) separateY2 = 0;
+                                        if (Math.abs(separateX1) > 32 
+                                        || Math.abs(separateX2) > 32 
+                                        || Math.abs(separateY1) > 32
+                                        || Math.abs(separateY2) > 32) 
+                                        {
+                                            trace('big move');
+                                        }
                                         var event:ECollision = {
                                             id1: id1,
                                             id2: id2,
                                             normal1: normal1,
                                             normal2: normal2,
-                                            dx1: dv1.x,
-                                            dy1: dv1.y,
-                                            dx2: dv2.x,
-                                            dy2: dv2.y,
+                                            dx1: update_dv1.x,
+                                            dy1: update_dv1.y,
+                                            dx2: update_dv2.x,
+                                            dy2: update_dv2.y,
                                             separateX1: separateX1,
                                             separateX2: separateX2,
                                             separateY1: separateY1,
                                             separateY2: separateY2
                                         }
                                         collisionEmitter.emit(event);
-                                        updateRectsAfterCollision(event);
+                                        syncPrev(id1, update_currentRect);
+                                        syncPrev(id2, update_currentRect);
                                     }
                                 }
                                 case None: {}
@@ -465,15 +491,14 @@ class CollisionSys {
                         }
                     }
                     else {  
-                        //was not overlapping, tunneled into each other.  
-                        var intersection = getRectLineIntersection(rectDiff, line,
-                            Math.NEGATIVE_INFINITY, Math.POSITIVE_INFINITY);
+                        //was not overlapping, check if tunneled into each other 
+                        var intersection = getRectLineIntersection(update_rectDiff, update_line,
+                            0, 1);
                         switch intersection {
                             case Some(intersection): {
                                 final ti1 = intersection.ti1;
                                 final ti2 = intersection.ti2;
-                                if (ti1 < 1 
-                                && (0 < ti1 + EPSILON || (ti1 == 0 && ti2 > 0)))
+                                if (ti1 < 1)
                                 {
                                     var normal1 = new MFloatVector2();
                                     normal1.x = intersection.nx1;
@@ -485,47 +510,48 @@ class CollisionSys {
                                     var separateX2 = 0.;
                                     var separateY1 = 0.;
                                     var separateY2 = 0.;
-                                    if ((dv1.x > 0 && normal1.x < 0) 
-                                    || (dv1.x < 0 && normal1.x > 0)) 
+                                    separateX1 = update_dv1.x * intersection.ti1;
+                                    separateX2 = update_dv2.x * intersection.ti1;
+                                    separateY1 = update_dv1.y * intersection.ti1;
+                                    separateY2 = update_dv2.y * intersection.ti1;
+                                    // if (normal1.x != 0) {
+                                    //     separateX1 = update_dv1.x * intersection.ti1;
+                                    //     separateX2 = update_dv2.x * intersection.ti1;
+                                    //     separateY1 = update_dv1.y;
+                                    //     separateY2 = update_dv2.y;
+                                    // }
+                                    // else if (normal1.y != 0) {
+                                    //     separateX1 = update_dv1.x;
+                                    //     separateX2 = update_dv2.x;
+                                    //     separateY1 = update_dv1.y * intersection.ti1;
+                                    //     separateY2 = update_dv2.y * intersection.ti1;
+                                    // }
+                                    if (Math.abs(separateX1) > 32 
+                                    || Math.abs(separateX2) > 32 
+                                    || Math.abs(separateY1) > 32
+                                    || Math.abs(separateY2) > 32) 
                                     {
-                                        separateX1 = -dv1.x + line.x2 * intersection.ti1;
+                                        trace('big move');
                                     }
-                                    if ((dv2.x > 0 && normal2.x < 0) 
-                                    || (dv2.x < 0 && normal2.x > 0)) 
-                                    {
-                                        separateX2 = -dv2.x - line.x2 * intersection.ti1;
-                                    }
-                                    if ((dv1.y > 0 && normal1.y < 0) 
-                                    || (dv1.y < 0 && normal1.y > 0)) 
-                                    {
-                                        separateY1 = -dv1.y + line.y2 * intersection.ti1;
-                                    }
-                                    if ((dv2.y > 0 && normal2.y < 0) 
-                                    || (dv2.y < 0 && normal2.y > 0)) 
-                                    {
-                                        separateY2 = -dv2.y - line.y2 * intersection.ti1;
-                                    }
-                                    if (Math.abs(separateX1) < EPSILON) separateX1 = 0;
-                                    if (Math.abs(separateX2) < EPSILON) separateX2 = 0;
-                                    if (Math.abs(separateY1) < EPSILON) separateY1 = 0;
-                                    if (Math.abs(separateY2) < EPSILON) separateY2 = 0;
                                     var event:ECollision = {
                                         id1: id1,
                                         id2: id2,
                                         normal1: normal1,
                                         normal2: normal2,
-                                        dx1: dv1.x,
-                                        dy1: dv1.y,
-                                        dx2: dv2.x,
-                                        dy2: dv2.y,
+                                        dx1: update_dv1.x,
+                                        dy1: update_dv1.y,
+                                        dx2: update_dv2.x,
+                                        dy2: update_dv2.y,
                                         separateX1: separateX1,
                                         separateX2: separateX2,
                                         separateY1: separateY1,
                                         separateY2: separateY2
                                     }
                                     collisionEmitter.emit(event);
-                                    updateRectsAfterCollision(event);
+                                    syncPrev(id1, update_currentRect);
+                                    syncPrev(id2, update_currentRect);
                                 }
+                                else {}
                             } 
                             case None: {}
                         }
@@ -533,5 +559,14 @@ class CollisionSys {
                 }
             }
         }
+
+        for (id in query.result) {
+            syncPrev(id, update_currentRect);
+            // var collidable = collidables[id];
+            // normalizeRectFromCollidable(collidable, update_currentRect);
+            // prevRects[id].pullFrom(update_currentRect);
+        }
+
+        //cleanup
     }
 }
