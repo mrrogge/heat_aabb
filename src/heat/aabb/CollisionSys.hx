@@ -121,12 +121,15 @@ class CollisionSys {
     function pointToCells(x:Float, y:Float, dest:Array<Cell>):Array<Cell> {
         while (dest.length > 0) dest.pop();
         dest.push(getCell(Math.floor(x/cellSize), Math.floor(y/cellSize)));
-        var cell = getCell(Math.floor(x/cellSize), Math.ceil(y/cellSize));
-        if (!dest.contains(cell)) dest.push(cell);
-        cell = getCell(Math.ceil(x/cellSize), Math.floor(y/cellSize));
-        if (!dest.contains(cell)) dest.push(cell);
-        cell = getCell(Math.ceil(x/cellSize), Math.ceil(y/cellSize));
-        if (!dest.contains(cell)) dest.push(cell);
+        var cell:Cell;
+        if (x/cellSize - Math.floor(x/cellSize) == 0) {
+            cell = getCell(Math.ceil(x/cellSize), Math.floor(y/cellSize));
+            if (!dest.contains(cell)) dest.push(cell);
+        }
+        if (y/cellSize - Math.floor(y/cellSize) == 0) {
+            cell = getCell(Math.floor(x/cellSize), Math.ceil(y/cellSize));
+            if (!dest.contains(cell)) dest.push(cell);
+        }       
         return dest;
     }
 
@@ -312,7 +315,10 @@ class CollisionSys {
     var update_dv = new MFloatVector2();
     var update_line = new Line();
     var update_rectDiff = new MRect();
+    var maxCount = 0;
     public function update(dt:Float) {
+        var count = 0;
+        var cellCount = 0;
         query.run();
         for (id in query.result) {
             var collidable = collidables[id];
@@ -329,13 +335,17 @@ class CollisionSys {
 
         for (id1 in query.result) {
             var collidable1 = collidables[id1];
-            if (collidable1.isStatic) continue;
+            // if (collidable1.isStatic) continue;
             var currentRect1 = normalizeRectFromCollidable(collidable1);
             getContainingRect(prevRects[id1], currentRect1, update_movedRect);
             getCellsInRect(update_movedRect, cellsArray);
+            checkedIds.clear();
             for (cell in cellsArray) {
+                if (id1 == "hero") cellCount++;
                 for (id2 => _ in cell.ids) {
                     if (id1 == id2) continue;
+                    if (checkedIds.exists(id2)) continue;
+                    checkedIds[id2] = true;
                     var collidable2 = collidables[id2];
                     if (collidable2 == null) {
                         cell.ids.remove(id2);
@@ -343,6 +353,7 @@ class CollisionSys {
                         continue;
                     }
                     if (!filter(id1, id2)) continue;
+                    count++;
                     var currentRect2 = normalizeRectFromCollidable(collidable2);
                     update_dv1.init(
                         currentRect1.x - prevRects[id1].x,
@@ -366,29 +377,30 @@ class CollisionSys {
                         var intersectionHeight = Math.min(collidable1.rect.h,
                             Math.abs(nearestCornerToOrigin.y));
                         //Check if they are moving relative to each other or not
-                        if (update_dv.x == 0 && update_dv.y == 0) {
+                        // if (update_dv.x == 0 && update_dv.y == 0) {
+                        if (true) {
                             //not moving relative to each other. Separate by finding the shortest displacement vector
                             var n1 = new MFloatVector2();
                             var n2 = new MFloatVector2();
-                            var separateX1 = -update_dv1.x;
-                            var separateY1 = -update_dv1.y;
-                            var separateX2 = -update_dv2.x;
-                            var separateY2 = -update_dv2.y;
+                            var separateX1 = 0.;
+                            var separateY1 = 0.;
+                            var separateX2 = 0.;
+                            var separateY2 = 0.;
                             if (Math.abs(nearestCornerToOrigin.x) < Math.abs(nearestCornerToOrigin.y)) {
                                 n1.x = nearestCornerToOrigin.x/Math.abs(nearestCornerToOrigin.x);
                                 n1.y = 0;
                                 n2.x = -n1.x;
                                 n2.y = 0;
-                                separateX1 -= nearestCornerToOrigin.x;
-                                separateX2 += nearestCornerToOrigin.x;
+                                separateX1 = -update_dv1.x - nearestCornerToOrigin.x;
+                                separateX2 = -update_dv2.x + nearestCornerToOrigin.x;
                             }
                             else {
                                 n1.x = 0;
                                 n1.y = nearestCornerToOrigin.y/Math.abs(nearestCornerToOrigin.y);
                                 n2.x = 0;
                                 n2.y = -n1.y;
-                                separateY1 -= nearestCornerToOrigin.y;
-                                separateY2 += nearestCornerToOrigin.y; 
+                                separateY1 = -update_dv1.y - nearestCornerToOrigin.y;
+                                separateY2 = -update_dv2.y + nearestCornerToOrigin.y; 
                             }
                             if (Math.abs(separateX1) < EPSILON) separateX1 = 0;
                             if (Math.abs(separateX2) < EPSILON) separateX2 = 0;
@@ -421,7 +433,7 @@ class CollisionSys {
                         }
                         else {
                             //moving relative to each other. Separate along dv line, away from each other.
-                            var intersection = getRectLineIntersection(update_rectDiff, update_line, Math.NEGATIVE_INFINITY, 1);
+                            var intersection = getRectLineIntersection(update_rectDiff, update_line, Math.NEGATIVE_INFINITY, Math.POSITIVE_INFINITY);
                             switch intersection {
                                 case Some(intersection): {
                                     final ti1 = intersection.ti1;
@@ -437,10 +449,20 @@ class CollisionSys {
                                         var separateX2 = 0.;
                                         var separateY1 = 0.;
                                         var separateY2 = 0.;
-                                        separateX1 = update_dv1.x * -intersection.ti1;
-                                        separateX2 = update_dv2.x * intersection.ti1;
-                                        separateY1 = update_dv1.y * -intersection.ti1;
-                                        separateY2 = update_dv2.y * intersection.ti1;
+                                        if (normal1.x != 0) {
+                                            separateX1 = -update_dv1.x - update_line.x2 * intersection.ti1;
+                                            separateX2 = -update_dv2.x + update_line.x2 * intersection.ti1;
+                                            separateY1 = 0;
+                                            separateY2 = 0;
+                                        }
+                                        else if (normal1.y != 0) {
+                                            separateX1 = 0;
+                                            separateX2 = 0;
+                                            separateY1 = -update_dv1.y - update_line.y2 * intersection.ti1;
+                                            separateY2 = -update_dv2.y + update_line.y2 * intersection.ti1;
+                                        }
+                                        // separateY1 = update_dv1.y * -intersection.ti1;
+                                        // separateY2 = update_dv2.y * intersection.ti1;
                                         // if (normal1.x != 0) {
                                         //     separateX1 = update_dv1.x * -intersection.ti1;
                                         //     separateX2 = update_dv2.x * intersection.ti1;
@@ -569,5 +591,9 @@ class CollisionSys {
         }
 
         //cleanup
+
+        if (count > maxCount) maxCount = count;
+        trace(maxCount, count);
+        // trace(cellCount);
     }
 }
