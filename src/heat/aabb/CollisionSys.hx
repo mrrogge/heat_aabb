@@ -255,8 +255,8 @@ class CollisionSys {
     function normalizeRectFromCollidable(collidable:Collidable, ?destRect:MRect)
     :MRect {
         if (destRect == null) destRect = rectPool.get();
-        destRect.x = collidable.rect.x + collidable.offset.x;
-        destRect.y = collidable.rect.y + collidable.offset.y;
+        destRect.x = collidable.rect.x - collidable.offset.x;
+        destRect.y = collidable.rect.y - collidable.offset.y;
         destRect.w = collidable.rect.w;
         destRect.h = collidable.rect.h;
         return destRect;
