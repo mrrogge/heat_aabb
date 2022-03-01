@@ -7,6 +7,8 @@ import heat.vector.*;
 
 using tink.core.Option.OptionTools;
 
+//https://blog.hamaluik.ca/posts/swept-aabb-collision-using-minkowski-difference/
+
 private class Cell {
     public var row(default, null):Int;
     public var col(default, null):Int;
@@ -315,10 +317,10 @@ class CollisionSys {
     var update_dv = new MFloatVector2();
     var update_line = new Line();
     var update_rectDiff = new MRect();
+    var checkedPairs = new Map<heat.ecs.EntityId, Map<heat.ecs.EntityId, Bool>>();
     var maxCount = 0;
     public function update(dt:Float) {
         var count = 0;
-        var cellCount = 0;
         query.run();
         for (id in query.result) {
             var collidable = collidables[id];
@@ -333,19 +335,27 @@ class CollisionSys {
             }
         }
 
+        for (id1 => m in checkedPairs) {
+            m.clear();
+        }
+
         for (id1 in query.result) {
             var collidable1 = collidables[id1];
-            if (collidable1.isStatic) continue;
             var currentRect1 = normalizeRectFromCollidable(collidable1);
             getContainingRect(prevRects[id1], currentRect1, update_movedRect);
             getCellsInRect(update_movedRect, cellsArray);
-            checkedIds.clear();
+            if (!checkedPairs.exists(id1)) checkedPairs[id1] = new Map<heat.ecs.EntityId, Bool>();
             for (cell in cellsArray) {
-                if (id1 == "hero") cellCount++;
                 for (id2 => _ in cell.ids) {
                     if (id1 == id2) continue;
-                    if (checkedIds.exists(id2)) continue;
-                    checkedIds[id2] = true;
+                    if (checkedPairs[id1].exists(id2)) {
+                        continue;
+                    }
+                    else {
+                        checkedPairs[id1][id2] = true;
+                        if (!checkedPairs.exists(id2)) checkedPairs[id2] = new Map<heat.ecs.EntityId, Bool>();
+                        checkedPairs[id2][id1] = true;
+                    }
                     var collidable2 = collidables[id2];
                     if (collidable2 == null) {
                         cell.ids.remove(id2);
@@ -369,7 +379,7 @@ class CollisionSys {
                     diffRects(prevRects[id1], prevRects[id2], update_rectDiff);
                     var prevRect1 = prevRects[id1];
                     var prevRect2 = prevRects[id2];
-                    if (update_rectDiff.containsPoint(0, 0)) {
+                    if (update_rectDiff.containsPoint(0, 0, -1e-7)) {
                         //was already overlapping
                         var nearestCornerToOrigin = getNearestCorner(update_rectDiff, 0, 0);
                         var intersectionWidth = Math.min(collidable1.rect.w, 
@@ -377,8 +387,7 @@ class CollisionSys {
                         var intersectionHeight = Math.min(collidable1.rect.h,
                             Math.abs(nearestCornerToOrigin.y));
                         //Check if they are moving relative to each other or not
-                        // if (update_dv.x == 0 && update_dv.y == 0) {
-                        if (true) {
+                        if (update_dv.x == 0 && update_dv.y == 0) {
                             //not moving relative to each other. Separate by finding the shortest displacement vector
                             var n1 = new MFloatVector2();
                             var n2 = new MFloatVector2();
@@ -387,32 +396,37 @@ class CollisionSys {
                             var separateX2 = 0.;
                             var separateY2 = 0.;
                             if (Math.abs(nearestCornerToOrigin.x) < Math.abs(nearestCornerToOrigin.y)) {
-                                n1.x = nearestCornerToOrigin.x/Math.abs(nearestCornerToOrigin.x);
+                                n1.x =  nearestCornerToOrigin.x/Math.abs(nearestCornerToOrigin.x == 0 ? 1 : nearestCornerToOrigin.x);
                                 n1.y = 0;
                                 n2.x = -n1.x;
                                 n2.y = 0;
-                                separateX1 = -update_dv1.x - nearestCornerToOrigin.x;
-                                separateX2 = -update_dv2.x + nearestCornerToOrigin.x;
+                                separateX1 = -nearestCornerToOrigin.x;
+                                separateX2 = nearestCornerToOrigin.x;
                             }
                             else {
                                 n1.x = 0;
-                                n1.y = nearestCornerToOrigin.y/Math.abs(nearestCornerToOrigin.y);
+                                n1.y = nearestCornerToOrigin.y/Math.abs(nearestCornerToOrigin.y == 0 ? 1 : nearestCornerToOrigin.y);
                                 n2.x = 0;
                                 n2.y = -n1.y;
-                                separateY1 = -update_dv1.y - nearestCornerToOrigin.y;
-                                separateY2 = -update_dv2.y + nearestCornerToOrigin.y; 
+                                separateY1 = -nearestCornerToOrigin.y;
+                                separateY2 = nearestCornerToOrigin.y; 
+                            }
+                            if (n1.x/Math.abs(n1.x) == update_dv1.x/Math.abs(update_dv1.x)) {
+                                separateX1 -= update_dv1.x;
+                            }
+                            if (n2.x/Math.abs(n2.x) == update_dv2.x/Math.abs(update_dv2.x)) {
+                                separateX2 -= update_dv2.x;
+                            }
+                            if (n1.y/Math.abs(n1.y) == update_dv1.y/Math.abs(update_dv1.y)) {
+                                separateY1 -= update_dv1.y;
+                            }
+                            if (n2.y/Math.abs(n2.y) == update_dv2.y/Math.abs(update_dv2.y)) {
+                                separateY2 -= update_dv2.y;
                             }
                             if (Math.abs(separateX1) < EPSILON) separateX1 = 0;
                             if (Math.abs(separateX2) < EPSILON) separateX2 = 0;
                             if (Math.abs(separateY1) < EPSILON) separateY1 = 0;
                             if (Math.abs(separateY2) < EPSILON) separateY2 = 0;
-                            if (Math.abs(separateX1) > 32 
-                            || Math.abs(separateX2) > 32 
-                            || Math.abs(separateY1) > 32
-                            || Math.abs(separateY2) > 32) 
-                            {
-                                trace('big move');
-                            }
                             var event:ECollision = {
                                 id1: id1,
                                 id2: id2,
@@ -425,89 +439,112 @@ class CollisionSys {
                                 separateX1: separateX1,
                                 separateY1: separateY1,
                                 separateX2: separateX2,
-                                separateY2: separateY2
+                                separateY2: separateY2,
+                                dt: dt
                             };
                             collisionEmitter.emit(event);
-                            syncPrev(id1, update_currentRect);
-                            syncPrev(id2, update_currentRect);
                         }
                         else {
                             //moving relative to each other. Separate along dv line, away from each other.
-                            var intersection = getRectLineIntersection(update_rectDiff, update_line, Math.NEGATIVE_INFINITY, Math.POSITIVE_INFINITY);
+                            var intersection = getRectLineIntersection(update_rectDiff, update_line, Math.NEGATIVE_INFINITY, 1);
                             switch intersection {
                                 case Some(intersection): {
                                     final ti1 = intersection.ti1;
                                     final ti2 = intersection.ti2;
-                                    if (ti1 < 1) {
-                                        var normal1 = new MFloatVector2();
+                                    var separateX1 = 0.;
+                                    var separateX2 = 0.;
+                                    var separateY1 = 0.;
+                                    var separateY2 = 0.;
+                                    var normal1 = new MFloatVector2();
+                                    var normal2 = new MFloatVector2();
+                                    var edgeDist1 = 0.;
+                                    var edgeDist2 = 0.;
+                                    if (intersection.nx1 != 0) {
+                                        edgeDist1 = ti1 * update_line.x2;
+                                    }
+                                    else if (intersection.ny1 != 0) {
+                                        edgeDist1 = ti1 * update_line.y2;
+                                    }
+                                    else {
+                                        edgeDist1 = Math.POSITIVE_INFINITY;
+                                    }
+                                    if (intersection.nx2 != 0) {
+                                        edgeDist2 = ti2 * update_line.x2;
+                                    }
+                                    else if (intersection.ny2 != 0) {
+                                        edgeDist2 = ti2 * update_line.y2;
+                                    }
+                                    else {
+                                        edgeDist2 = Math.POSITIVE_INFINITY;
+                                    }
+                                    if (Math.abs(edgeDist1) < Math.abs(edgeDist2)) {
                                         normal1.x = intersection.nx1;
                                         normal1.y = intersection.ny1;
-                                        var normal2 = new MFloatVector2();
                                         normal2.x = -normal1.x;
                                         normal2.y = -normal1.y;
-                                        var separateX1 = 0.;
-                                        var separateX2 = 0.;
-                                        var separateY1 = 0.;
-                                        var separateY2 = 0.;
                                         if (normal1.x != 0) {
-                                            separateX1 = -update_dv1.x - update_line.x2 * intersection.ti1;
-                                            separateX2 = -update_dv2.x + update_line.x2 * intersection.ti1;
-                                            separateY1 = 0;
-                                            separateY2 = 0;
+                                            separateX1 = -update_line.x2 * intersection.ti1;
                                         }
-                                        else if (normal1.y != 0) {
-                                            separateX1 = 0;
-                                            separateX2 = 0;
-                                            separateY1 = -update_dv1.y - update_line.y2 * intersection.ti1;
-                                            separateY2 = -update_dv2.y + update_line.y2 * intersection.ti1;
+                                        if (normal2.x != 0) {
+                                            separateX2 = update_line.x2 * intersection.ti1;
                                         }
-                                        // separateY1 = update_dv1.y * -intersection.ti1;
-                                        // separateY2 = update_dv2.y * intersection.ti1;
-                                        // if (normal1.x != 0) {
-                                        //     separateX1 = update_dv1.x * -intersection.ti1;
-                                        //     separateX2 = update_dv2.x * intersection.ti1;
-                                        //     // separateX1 = -update_dv1.x - update_line.x2 * intersection.ti1;
-                                        //     // separateX2 = -update_dv2.x + update_line.x2 * intersection.ti1;
-                                        //     separateY1 = 0;
-                                        //     separateY2 = 0;
-                                        // }
-                                        // else if (normal1.y != 0) {
-                                        //     separateX1 = 0;
-                                        //     separateX2 = 0;
-                                        //     separateY1 = update_dv1.y * -intersection.ti1;
-                                        //     separateY2 = update_dv2.y * intersection.ti1;
-                                        //     // separateY1 = -update_dv1.y - update_line.y2 * intersection.ti1;
-                                        //     // separateY2 = -update_dv2.y + update_line.y2 * intersection.ti1;
-                                        // }
-                                        if (Math.abs(separateX1) < EPSILON) separateX1 = 0;
-                                        if (Math.abs(separateX2) < EPSILON) separateX2 = 0;
-                                        if (Math.abs(separateY1) < EPSILON) separateY1 = 0;
-                                        if (Math.abs(separateY2) < EPSILON) separateY2 = 0;
-                                        if (Math.abs(separateX1) > 32 
-                                        || Math.abs(separateX2) > 32 
-                                        || Math.abs(separateY1) > 32
-                                        || Math.abs(separateY2) > 32) 
-                                        {
-                                            trace('big move');
+                                        if (normal1.y != 0) {
+                                            separateY1 = -update_line.y2 * intersection.ti1;
                                         }
-                                        var event:ECollision = {
-                                            id1: id1,
-                                            id2: id2,
-                                            normal1: normal1,
-                                            normal2: normal2,
-                                            dx1: update_dv1.x,
-                                            dy1: update_dv1.y,
-                                            dx2: update_dv2.x,
-                                            dy2: update_dv2.y,
-                                            separateX1: separateX1,
-                                            separateX2: separateX2,
-                                            separateY1: separateY1,
-                                            separateY2: separateY2
+                                        if (normal2.y != 0) {
+                                            separateY2 = update_line.y2 * intersection.ti1;
                                         }
-                                        collisionEmitter.emit(event);
-                                        syncPrev(id1, update_currentRect);
-                                        syncPrev(id2, update_currentRect);
                                     }
+                                    else {
+                                        normal1.x = intersection.nx2;
+                                        normal1.y = intersection.ny2;
+                                        normal2.x = -normal1.x;
+                                        normal2.y = -normal1.y;
+                                        if (normal1.x != 0) {
+                                            separateX1 = -update_line.x2 * intersection.ti2;
+                                        }
+                                        if (normal2.x != 0) {
+                                            separateX2 = update_line.x2 * intersection.ti2;
+                                        }
+                                        if (normal1.y != 0) {
+                                            separateY1 = -update_line.y2 * intersection.ti2;
+                                        }
+                                        if (normal2.y != 0) {
+                                            separateY2 = update_line.y2 * intersection.ti2;
+                                        }
+                                    }
+                                    if (normal1.x/Math.abs(normal1.x) == update_dv1.x/Math.abs(update_dv1.x)) {
+                                        separateX1 -= update_dv1.x;
+                                    }
+                                    if (normal2.x/Math.abs(normal2.x) == update_dv2.x/Math.abs(update_dv2.x)) {
+                                        separateX2 -= update_dv2.x;
+                                    }
+                                    if (normal1.y/Math.abs(normal1.y) == update_dv1.y/Math.abs(update_dv1.y)) {
+                                        separateY1 -= update_dv1.y;
+                                    }
+                                    if (normal2.y/Math.abs(normal2.y) == update_dv2.y/Math.abs(update_dv2.y)) {
+                                        separateY2 -= update_dv2.y;
+                                    }
+                                    if (Math.abs(separateX1) < EPSILON) separateX1 = 0;
+                                    if (Math.abs(separateX2) < EPSILON) separateX2 = 0;
+                                    if (Math.abs(separateY1) < EPSILON) separateY1 = 0;
+                                    if (Math.abs(separateY2) < EPSILON) separateY2 = 0;
+                                    var event:ECollision = {
+                                        id1: id1,
+                                        id2: id2,
+                                        normal1: normal1,
+                                        normal2: normal2,
+                                        dx1: update_dv1.x,
+                                        dy1: update_dv1.y,
+                                        dx2: update_dv2.x,
+                                        dy2: update_dv2.y,
+                                        separateX1: separateX1,
+                                        separateX2: separateX2,
+                                        separateY1: separateY1,
+                                        separateY2: separateY2,
+                                        dt: dt
+                                    }
+                                    collisionEmitter.emit(event);
                                 }
                                 case None: {}
                             }
@@ -521,60 +558,45 @@ class CollisionSys {
                             case Some(intersection): {
                                 final ti1 = intersection.ti1;
                                 final ti2 = intersection.ti2;
-                                if (ti1 < 1)
-                                {
-                                    var normal1 = new MFloatVector2();
-                                    normal1.x = intersection.nx1;
-                                    normal1.y = intersection.ny1;
-                                    var normal2 = new MFloatVector2();
-                                    normal2.x = -normal1.x;
-                                    normal2.y = -normal1.y;
-                                    var separateX1 = 0.;
-                                    var separateX2 = 0.;
-                                    var separateY1 = 0.;
-                                    var separateY2 = 0.;
-                                    separateX1 = update_dv1.x * intersection.ti1;
-                                    separateX2 = update_dv2.x * intersection.ti1;
-                                    separateY1 = update_dv1.y * intersection.ti1;
-                                    separateY2 = update_dv2.y * intersection.ti1;
-                                    // if (normal1.x != 0) {
-                                    //     separateX1 = update_dv1.x * intersection.ti1;
-                                    //     separateX2 = update_dv2.x * intersection.ti1;
-                                    //     separateY1 = update_dv1.y;
-                                    //     separateY2 = update_dv2.y;
-                                    // }
-                                    // else if (normal1.y != 0) {
-                                    //     separateX1 = update_dv1.x;
-                                    //     separateX2 = update_dv2.x;
-                                    //     separateY1 = update_dv1.y * intersection.ti1;
-                                    //     separateY2 = update_dv2.y * intersection.ti1;
-                                    // }
-                                    if (Math.abs(separateX1) > 32 
-                                    || Math.abs(separateX2) > 32 
-                                    || Math.abs(separateY1) > 32
-                                    || Math.abs(separateY2) > 32) 
-                                    {
-                                        trace('big move');
-                                    }
-                                    var event:ECollision = {
-                                        id1: id1,
-                                        id2: id2,
-                                        normal1: normal1,
-                                        normal2: normal2,
-                                        dx1: update_dv1.x,
-                                        dy1: update_dv1.y,
-                                        dx2: update_dv2.x,
-                                        dy2: update_dv2.y,
-                                        separateX1: separateX1,
-                                        separateX2: separateX2,
-                                        separateY1: separateY1,
-                                        separateY2: separateY2
-                                    }
-                                    collisionEmitter.emit(event);
-                                    syncPrev(id1, update_currentRect);
-                                    syncPrev(id2, update_currentRect);
+                                var normal1 = new MFloatVector2();
+                                normal1.x = intersection.nx1;
+                                normal1.y = intersection.ny1;
+                                var normal2 = new MFloatVector2();
+                                normal2.x = -normal1.x;
+                                normal2.y = -normal1.y;
+                                var separateX1 = 0.;
+                                var separateX2 = 0.;
+                                var separateY1 = 0.;
+                                var separateY2 = 0.;
+                                if (normal1.x != 0) {
+                                    separateX1 = -update_dv1.x * (1-intersection.ti1);
+                                    separateX2 = -update_dv2.x * (1-intersection.ti1);
                                 }
-                                else {}
+                                else if (normal1.y != 0) {
+                                    separateY1 = -update_dv1.y * (1-intersection.ti1);
+                                    separateY2 = -update_dv2.y * (1-intersection.ti1);
+                                }
+                                if (Math.abs(separateX1) < EPSILON) separateX1 = 0;
+                                if (Math.abs(separateX2) < EPSILON) separateX2 = 0;
+                                if (Math.abs(separateY1) < EPSILON) separateY1 = 0;
+                                if (Math.abs(separateY2) < EPSILON) separateY2 = 0;
+                                var event:ECollision = {
+                                    id1: id1,
+                                    id2: id2,
+                                    normal1: normal1,
+                                    normal2: normal2,
+                                    dx1: update_dv1.x,
+                                    dy1: update_dv1.y,
+                                    dx2: update_dv2.x,
+                                    dy2: update_dv2.y,
+                                    separateX1: separateX1,
+                                    separateX2: separateX2,
+                                    separateY1: separateY1,
+                                    separateY2: separateY2,
+                                    dt: dt
+                                }
+                                collisionEmitter.emit(event);
+
                             } 
                             case None: {}
                         }
@@ -585,15 +607,8 @@ class CollisionSys {
 
         for (id in query.result) {
             syncPrev(id, update_currentRect);
-            // var collidable = collidables[id];
-            // normalizeRectFromCollidable(collidable, update_currentRect);
-            // prevRects[id].pullFrom(update_currentRect);
         }
 
-        //cleanup
-
-        if (count > maxCount) maxCount = count;
-        trace(maxCount, count);
-        // trace(cellCount);
+        // trace(count);
     }
 }

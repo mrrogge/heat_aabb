@@ -17,4 +17,5 @@ typedef ECollision = {
     final separateY1:Float;
     final separateX2:Float;
     final separateY2:Float;
+    final dt:Float;
 }
