@@ -72,6 +72,8 @@ class CollisionSys {
 
     var intersectionPool:Pool<RectLineIntersection>;
 
+    public var colCount(default, null) = 0;
+
     public function new(collidables:heat.ecs.ComMap<Collidable>, cellSize=64) {
         this.collidables = collidables;
         this.cellSize = cellSize;
@@ -318,9 +320,8 @@ class CollisionSys {
     var update_line = new Line();
     var update_rectDiff = new MRect();
     var checkedPairs = new Map<heat.ecs.EntityId, Map<heat.ecs.EntityId, Bool>>();
-    var maxCount = 0;
     public function update(dt:Float) {
-        var count = 0;
+        colCount = 0;
         query.run();
         for (id in query.result) {
             var collidable = collidables[id];
@@ -363,7 +364,7 @@ class CollisionSys {
                         continue;
                     }
                     if (!filter(id1, id2)) continue;
-                    count++;
+                    colCount++;
                     var currentRect2 = normalizeRectFromCollidable(collidable2);
                     update_dv1.init(
                         currentRect1.x - prevRects[id1].x,
@@ -608,7 +609,5 @@ class CollisionSys {
         for (id in query.result) {
             syncPrev(id, update_currentRect);
         }
-
-        // trace(count);
     }
 }
