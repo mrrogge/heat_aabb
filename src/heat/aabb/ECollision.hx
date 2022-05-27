@@ -1,7 +1,7 @@
 package heat.aabb;
 
 import heat.ecs.*;
-import heat.vector.*;
+import heat.core.*;
 
 typedef ECollision = {
     final id1:heat.ecs.EntityId;

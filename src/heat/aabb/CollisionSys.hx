@@ -2,8 +2,7 @@ package heat.aabb;
 
 import heat.ecs.*;
 import core.*;
-import heat.pool.Pool;
-import heat.vector.*;
+import heat.core.*;
 
 using tink.core.Option.OptionTools;
 
