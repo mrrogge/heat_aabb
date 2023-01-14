@@ -1,6 +1,6 @@
 package heat.aabb;
 
-using heat.core.MathTools;
+using heat.AllCore;
 
 class MRect implements IRect {
     public var x(get, set):Float;
@@ -138,8 +138,8 @@ class MRect implements IRect {
     }
 
     public inline function containsPoint(x:Float, y:Float):Bool {
-        return x - leftX >= FP_ERR && y - topY >= FP_ERR
-            && rightX - x >= FP_ERR && bottomY - y >= FP_ERR;
+        return x - leftX >= Math.FP_ERR() && y - topY >= Math.FP_ERR()
+            && rightX - x >= Math.FP_ERR() && bottomY - y >= Math.FP_ERR();
     }
 
     public inline function intersectsWithRect(other:IRect):Bool {

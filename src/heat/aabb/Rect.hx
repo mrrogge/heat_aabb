@@ -1,6 +1,6 @@
-package heat.core;
+package heat.aabb;
 
-using heat.core.MathTools;
+using heat.AllCore;
 
 class Rect implements IRect {
     public var x(get, never):Float;
@@ -70,19 +70,19 @@ class Rect implements IRect {
     }
 
     public static inline function areClose(r1:IRect, r2:IRect):Bool {
-        return r1.x - r2.x <= FP_ERR
-            && r1.y - r2.y <= FP_ERR
-            && r1.width - r2.width <= FP_ERR
-            && r1.height - r2.height <= FP_ERR
-            && r1.offsetX - r2.offsetX <= FP_ERR
-            && r1.offsetY - r2.offsetY <= FP_ERR;
+        return r1.x - r2.x <= Math.FP_ERR()
+            && r1.y - r2.y <= Math.FP_ERR()
+            && r1.width - r2.width <= Math.FP_ERR()
+            && r1.height - r2.height <= Math.FP_ERR()
+            && r1.offsetX - r2.offsetX <= Math.FP_ERR()
+            && r1.offsetY - r2.offsetY <= Math.FP_ERR();
     }
 
     public static inline function areCloseToSameSpace(r1:IRect, r2:IRect):Bool {
-        return r1.leftX - r2.leftX <= FP_ERR
-            && r1.topY - r2.topY <= FP_ERR
-            && r1.width - r2.width <= FP_ERR
-            && r1.height - r2.height <= FP_ERR;
+        return r1.leftX - r2.leftX <= Math.FP_ERR()
+            && r1.topY - r2.topY <= Math.FP_ERR()
+            && r1.width - r2.width <= Math.FP_ERR()
+            && r1.height - r2.height <= Math.FP_ERR();
     }
     
     public inline function clone():Rect {
@@ -128,8 +128,8 @@ class Rect implements IRect {
     }
 
     public inline function containsPoint(x:Float, y:Float):Bool {
-        return x - leftX >= FP_ERR && y - topY >= FP_ERR
-            && rightX - x >= FP_ERR && bottomY - y >= FP_ERR;
+        return x - leftX >= Math.FP_ERR() && y - topY >= Math.FP_ERR()
+            && rightX - x >= Math.FP_ERR() && bottomY - y >= Math.FP_ERR();
     }
 
     public inline function intersectsWithRect(other:IRect):Bool {
