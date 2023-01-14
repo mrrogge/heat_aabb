@@ -1,8 +1,6 @@
 --class-path src
 --class-path test
 -L tink_core
--L heat_event
--L heat_ecs
 -L heat_core
 -L buddy
 -D buddy-colors
