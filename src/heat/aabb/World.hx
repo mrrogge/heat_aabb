@@ -12,15 +12,7 @@ enum CollisionKind {
     OTHER(kind:String);
 }
 
-typedef Point = {x:Float, y:Float}
-
-typedef PointInt = {x:Int, y:Int}
-
-typedef Segment = {x1:Float, y1:Float, x2:Float, y2:Float}
-
-typedef Rect = {x:Float, y:Float, w:Float, h:Float}
-
-typedef Cell<T:EnumValue> = {itemCount:Int, cell:PointInt, items:Map<T, Bool>}
+typedef Cell<T:EnumValue> = {itemCount:Int, cell:VectorInt2, items:Map<T, Bool>}
 
 typedef RectSegmentIntersection = {
     ti1:Float,
@@ -34,16 +26,16 @@ typedef RectSegmentIntersection = {
 typedef Collision<T:EnumValue> = {
     overlaps:Bool,
     ti:Float,
-    move:Point,
-    normal:Point,
-    touch:Point,
+    move:VectorFloat2,
+    normal:VectorFloat2,
+    touch:VectorFloat2,
     item:T,
     itemRect:Rect,
     other:T,
     otherRect:Rect,
     kind:CollisionKind,
-    ?slide:Point,
-    ?bounce:Point
+    ?slide:VectorFloat2,
+    ?bounce:VectorFloat2
 }
 
 // grid_traverse* functions are based on "A Fast Voxel Traversal Algorithm for Ray Tracing",
@@ -58,11 +50,11 @@ typedef GridTraversalData = {
 }
 
 typedef ResponseData<T:EnumValue> = {
-    goal:Point,
+    goal:VectorFloat2,
     cols:Array<Collision<T>>
 }
 
-typedef ResponseFunc<T:EnumValue> = (world:World<T>, col:Collision<T>, rect:Rect, goal:Point, 
+typedef ResponseFunc<T:EnumValue> = (world:World<T>, col:Collision<T>, rect:Rect, goal:VectorFloat2, 
     filter:ColFilterFunc<T>)->ResponseData<T>;
 
 typedef ColFilterFunc<T:EnumValue> = (item:T, other:T)->CollisionKind;
@@ -123,7 +115,7 @@ class World<T:EnumValue> {
         return SLIDE;
     }
     
-    function rectGetNearestCorner(rect:Rect, point:Point):Point
+    function rectGetNearestCorner(rect:Rect, point:VectorFloat2):VectorFloat2
     {
         return {
             x:nearest(point.x, rect.x, rect.x+rect.w),
@@ -219,7 +211,7 @@ class World<T:EnumValue> {
         }
     }
     
-    function rectContainsPoint(rect:Rect, point:Point):Bool
+    function rectContainsPoint(rect:Rect, point:VectorFloat2):Bool
     {
         return point.x - rect.x > Math.FP_ERR() && point.y - rect.y > Math.FP_ERR() 
             && rect.x + rect.w - point.x > Math.FP_ERR() 
@@ -239,7 +231,7 @@ class World<T:EnumValue> {
         return dx*dx + dy*dy;
     }
     
-    function rectDetectCollision(rect1:Rect, rect2:Rect, goal:Point):haxe.ds.Option<Collision<T>>
+    function rectDetectCollision(rect1:Rect, rect2:Rect, goal:VectorFloat2):haxe.ds.Option<Collision<T>>
     {
         var dx = goal.x - rect1.x;
         var dy = goal.y - rect1.y;
@@ -326,14 +318,14 @@ class World<T:EnumValue> {
         });
     }
     
-    function gridToWorld(cellSize:Int, point:PointInt):Point {
+    function gridToWorld(cellSize:Int, point:VectorInt2):VectorFloat2 {
         return {
             x: (point.x-1)*cellSize,
             y: (point.y-1)*cellSize
         }
     }
     
-    function gridToCell(cellSize:Int, point:Point):PointInt {
+    function gridToCell(cellSize:Int, point:VectorFloat2):VectorInt2 {
         return {
             x:Math.floor(point.x / cellSize) + 1,
             y:Math.floor(point.y / cellSize) + 1
@@ -365,7 +357,7 @@ class World<T:EnumValue> {
         }
     }
     
-    function gridTraverse(cellSize:Int, p1:Point, p2:Point, f:(cell:PointInt)->Void):Void {
+    function gridTraverse(cellSize:Int, p1:VectorFloat2, p2:VectorFloat2, f:(cell:VectorInt2)->Void):Void {
         var cell1 = gridToCell(cellSize, p1);
         var cell2 = gridToCell(cellSize, p2);
         var tDataX = gridTraverseInitStep(cellSize, cell1.x, p1.x, p2.x);
@@ -404,13 +396,13 @@ class World<T:EnumValue> {
         return {x:cell.x, y:cell.y, w:cr - cell.x + 1, h:cb - cell.y + 1}
     }
 
-    function touch(world:World<T>, col:Collision<T>, rect:Rect, goal:Point, 
+    function touch(world:World<T>, col:Collision<T>, rect:Rect, goal:VectorFloat2, 
     filter:ColFilterFunc<T>):ResponseData<T>
     {
         return {goal:{x:col.touch.x, y:col.touch.y}, cols:new Array<Collision<T>>()}
     }
     
-    function cross(world:World<T>, col:Collision<T>, rect:Rect, goal:Point, 
+    function cross(world:World<T>, col:Collision<T>, rect:Rect, goal:VectorFloat2, 
     filter:ColFilterFunc<T>):ResponseData<T>
     {
         return {
@@ -419,7 +411,7 @@ class World<T:EnumValue> {
         }
     }
     
-    function slide(world:World<T>, col:Collision<T>, rect:Rect, goal:Point, 
+    function slide(world:World<T>, col:Collision<T>, rect:Rect, goal:VectorFloat2, 
     filter:ColFilterFunc<T>):ResponseData<T> 
     {
         var newGoal = {x:goal.x, y:goal.y};
@@ -439,7 +431,7 @@ class World<T:EnumValue> {
         }
     }
     
-    function bounce(world:World<T>, col:Collision<T>, rect:Rect, goal:Point, 
+    function bounce(world:World<T>, col:Collision<T>, rect:Rect, goal:VectorFloat2, 
     filter:ColFilterFunc<T>):ResponseData<T> 
     {
         var newGoal = {x:goal.x, y:goal.y};
@@ -464,7 +456,7 @@ class World<T:EnumValue> {
         return {goal:newGoal, cols:world.project(col.item, newRect, newGoal, filter)}
     }
 
-    function addItemToCell(item:T, cell:PointInt) {
+    function addItemToCell(item:T, cell:VectorInt2) {
         if (this.rows[cell.y] == null) this.rows[cell.y] = new Map<Int, Cell<T>>();
         var row = this.rows[cell.y];
         if (row[cell.x] == null) {
@@ -482,7 +474,7 @@ class World<T:EnumValue> {
         }
     }
 
-    function removeItemFromCell(item:T, cell:PointInt):Outcome<Noise, Error> {
+    function removeItemFromCell(item:T, cell:VectorInt2):Outcome<Noise, Error> {
         var row = rows[cell.y];
         if (row == null) return Failure(new Error("Row is empty"));
         if (!row.exists(cell.x)) return Failure(new Error("Column is empty"));
@@ -517,7 +509,7 @@ class World<T:EnumValue> {
         var visited = new Map<Cell<T>, Bool>();
         var cells = new Array<Cell<T>>();
         gridTraverse(cellSize, {x:seg.x1, y:seg.y1}, {x:seg.x2, y:seg.y2}, 
-        (cell:PointInt)->{
+        (cell:VectorInt2)->{
             if (!rows.exists(cell.y)) return;
             var row = rows[cell.y];
             if (!row.exists(cell.x)) return;
@@ -578,7 +570,7 @@ class World<T:EnumValue> {
         responses[OTHER(colKind)] = response;
     }
 
-    public function project(item:T, rect:Rect, goal:Point, 
+    public function project(item:T, rect:Rect, goal:VectorFloat2, 
     ?filter:ColFilterFunc<T>):Array<Collision<T>>
     {
         assertIsRect(rect.x, rect.y, rect.w, rect.h).sure();
@@ -658,11 +650,11 @@ class World<T:EnumValue> {
         }
     }
 
-    public function toWorld(cellPoint:PointInt):Point {
+    public function toWorld(cellPoint:VectorInt2):VectorFloat2 {
         return gridToWorld(cellSize, cellPoint);
     }
 
-    public function toCell(point:Point):PointInt {
+    public function toCell(point:VectorFloat2):VectorInt2 {
         return gridToCell(cellSize, point);
     }
 
