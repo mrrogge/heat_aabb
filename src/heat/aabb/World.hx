@@ -1,8 +1,6 @@
-package hxbump;
+package heat.aabb;
 
-import tink.core.Error;
-import tink.core.Outcome;
-import tink.core.Noise;
+using tink.CoreApi;
 
 var DELTA = 1e-10;
 
