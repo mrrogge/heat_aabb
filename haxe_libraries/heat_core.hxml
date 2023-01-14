@@ -1,4 +1,4 @@
-# @install: lix --silent download "gh://github.com/mrrogge/heat_core#99144dff16369be61f62ddb23b727eaca64fad2b" into heat_core/0.1.1/github/99144dff16369be61f62ddb23b727eaca64fad2b
--cp ${HAXE_LIBCACHE}/heat_core/0.1.1/github/99144dff16369be61f62ddb23b727eaca64fad2b/src
+-cp ${SCOPE_DIR}/./heat_core/src
 -D heat_core=0.1.1
---macro heat.core.macro.TupleBuilder.buildTuplesUpTo(5)
+${SCOPE_DIR}/./heat_core/extraParams.hxml
+--macro Sys.println("haxe_libraries/heat_core.hxml:2: [Warning] Using dev version of library heat_core")

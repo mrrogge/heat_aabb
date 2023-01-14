@@ -2,3 +2,6 @@
 	path = heat_ecs
 	url = https://github.com/mrrogge/heat_ecs
 	branch = next
+[submodule "heat_core"]
+	path = heat_core
+	url = https://github.com/mrrogge/heat_core.git
