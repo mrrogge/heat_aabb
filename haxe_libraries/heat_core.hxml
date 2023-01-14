@@ -1,4 +1,0 @@
--cp ${SCOPE_DIR}/./heat_core/src
--D heat_core=0.1.1
-${SCOPE_DIR}/./heat_core/extraParams.hxml
---macro Sys.println("haxe_libraries/heat_core.hxml:2: [Warning] Using dev version of library heat_core")
