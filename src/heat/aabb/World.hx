@@ -3,8 +3,6 @@ package heat.aabb;
 using tink.CoreApi;
 using heat.AllCore;
 
-var DELTA = 1e-10;
-
 enum CollisionKind {
     SLIDE;
     BOUNCE;
@@ -223,9 +221,9 @@ class World<T:EnumValue> {
     
     function rectContainsPoint(rect:Rect, point:Point):Bool
     {
-        return point.x - rect.x > DELTA && point.y - rect.y > DELTA 
-            && rect.x + rect.w - point.x > DELTA 
-            && rect.y + rect.h - point.y > DELTA;
+        return point.x - rect.x > Math.FP_ERR() && point.y - rect.y > Math.FP_ERR() 
+            && rect.x + rect.w - point.x > Math.FP_ERR() 
+            && rect.y + rect.h - point.y > Math.FP_ERR();
     }
     
     function rectIsIntersecting(rect1:Rect, rect2:Rect):Bool
@@ -266,8 +264,8 @@ class World<T:EnumValue> {
             switch segInt {
                 case Some(segInt): {
                     if (segInt.ti1 < 1 
-                    && Math.abs(segInt.ti1 - segInt.ti2) >= DELTA 
-                    && (0 < segInt.ti1 + DELTA || 0 == segInt.ti1 && segInt.ti2 > 0))
+                    && Math.abs(segInt.ti1 - segInt.ti2) >= Math.FP_ERR() 
+                    && (0 < segInt.ti1 + Math.FP_ERR() || 0 == segInt.ti1 && segInt.ti2 > 0))
                     {
                         ti = segInt.ti1;
                         nx = segInt.nx1;
