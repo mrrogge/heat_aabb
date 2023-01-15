@@ -1,4 +1,4 @@
-# @install: lix --silent download "gh://github.com/mrrogge/heat_core#7d60e2c91411073fbf9edf3ce3b14d47b2a7cbba" into heat_core/0.1.1/github/7d60e2c91411073fbf9edf3ce3b14d47b2a7cbba
--cp ${HAXE_LIBCACHE}/heat_core/0.1.1/github/7d60e2c91411073fbf9edf3ce3b14d47b2a7cbba/src
+# @install: lix --silent download "gh://github.com/mrrogge/heat_core#9629be05874cf7a0735f3996c3f8047b5d16e7a5" into heat_core/0.1.1/github/9629be05874cf7a0735f3996c3f8047b5d16e7a5
+-cp ${HAXE_LIBCACHE}/heat_core/0.1.1/github/9629be05874cf7a0735f3996c3f8047b5d16e7a5/src
 -D heat_core=0.1.1
 --macro heat.core.macro.TupleBuilder.buildTuplesUpTo(5)

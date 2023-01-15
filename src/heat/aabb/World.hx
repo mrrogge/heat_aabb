@@ -115,15 +115,7 @@ class World<T:EnumValue> {
         return SLIDE;
     }
     
-    function rectGetNearestCorner(rect:Rect, point:VectorFloat2):VectorFloat2
-    {
-        return {
-            x:nearest(point.x, rect.x, rect.x+rect.w),
-            y:nearest(point.y, rect.y, rect.y+rect.h)
-        }
-    }
-    
-    function rectGetSegmentIntersectionIndices(rect:Rect, seg:Segment, ?ti1:Float, 
+    function rectGetSegmentIntersectionIndices(rect:Rect, seg:LineSegment, ?ti1:Float, 
     ?ti2:Float):haxe.ds.Option<RectSegmentIntersection>
     {
         if (ti1 == null) ti1 = 0.;
@@ -243,7 +235,7 @@ class World<T:EnumValue> {
         var originPoint = {x:0., y:0.};
         if (rectContainsPoint(rectDiff, originPoint)) {
             //item was intersecting other
-            var point = rectGetNearestCorner(rectDiff, originPoint);
+            var point = rectDiff.nearestCornerTo(originPoint.x, originPoint.y);
             var wi = Math.min(rect1.w, Math.abs(point.x));
             var hi = Math.min(rect1.h, Math.abs(point.y));
             ti = -wi * hi;
@@ -274,7 +266,7 @@ class World<T:EnumValue> {
         if (overlaps) {
             if (dx == 0 && dy == 0) {
                 //intersecting and not moving - use minimum displacement vector
-                var point = rectGetNearestCorner(rectDiff, originPoint);
+                var point = rectDiff.nearestCornerTo(originPoint.x, originPoint.y);
                 if (Math.abs(point.x) < Math.abs(point.y)) {
                     point.y = 0;
                 }
@@ -505,7 +497,7 @@ class World<T:EnumValue> {
         return itemsDict;
     }
 
-    function getCellsTouchedBySegment(seg:Segment) {
+    function getCellsTouchedBySegment(seg:LineSegment) {
         var visited = new Map<Cell<T>, Bool>();
         var cells = new Array<Cell<T>>();
         gridTraverse(cellSize, {x:seg.x1, y:seg.y1}, {x:seg.x2, y:seg.y2}, 
@@ -521,7 +513,7 @@ class World<T:EnumValue> {
         return cells;
     }
 
-    function getInfoAboutItemsTouchedBySegment(seg:Segment, 
+    function getInfoAboutItemsTouchedBySegment(seg:LineSegment, 
     ?filter:(item:T)->Bool):Array<ItemQueryInfo<T>>
     {
         var cells = getCellsTouchedBySegment(seg);
