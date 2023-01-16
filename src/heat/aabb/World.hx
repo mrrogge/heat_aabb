@@ -3,6 +3,9 @@ package heat.aabb;
 using tink.CoreApi;
 using heat.AllCore;
 
+/**
+    Kinds of collisions
+**/
 enum CollisionKind {
     SLIDE;
     BOUNCE;
@@ -12,30 +15,44 @@ enum CollisionKind {
     OTHER(kind:String);
 }
 
+/**
+    Represents a cell in the spatial map. Each cell owns a Map of the items contained within it.
+**/
 typedef Cell<T:EnumValue> = {itemCount:Int, cell:VectorInt2, items:Map<T, Bool>}
 
+/**
+    Defines an intersection between a rectangle and a line segment.
+**/
 typedef RectSegmentIntersection = {
     ti1:Float,
     ti2:Float,
-    nx1:Float,
-    ny1:Float,
-    nx2:Float,
-    ny2:Float
+    nx1:Int,
+    ny1:Int,
+    nx2:Int,
+    ny2:Int
 }
 
+/**
+    Data for a single collision instance.
+**/
 typedef Collision<T:EnumValue> = {
     overlaps:Bool,
     ti:Float,
-    move:VectorFloat2,
-    normal:VectorFloat2,
-    touch:VectorFloat2,
+    moveX:Float,
+    moveY:Float,
+    normalX:Int,
+    normalY:Int,
+    touchX:Float,
+    touchY:Float,
     item:T,
     itemRect:Rect,
     other:T,
     otherRect:Rect,
     kind:CollisionKind,
-    ?slide:VectorFloat2,
-    ?bounce:VectorFloat2
+    slideX:Option<Float>,
+    slideY:Option<Float>,
+    bounceX:Option<Float>,
+    bounceY:Option<Float>
 }
 
 // grid_traverse* functions are based on "A Fast Voxel Traversal Algorithm for Ray Tracing",
@@ -50,17 +67,27 @@ typedef GridTraversalData = {
 }
 
 typedef ResponseData<T:EnumValue> = {
-    goal:VectorFloat2,
+    goalX:Float,
+    goalY:Float,
     cols:Array<Collision<T>>
 }
 
-typedef ResponseFunc<T:EnumValue> = (world:World<T>, col:Collision<T>, rect:Rect, goal:VectorFloat2, 
-    filter:ColFilterFunc<T>)->ResponseData<T>;
+/**
+    Function signature for a collision response.
+**/
+typedef ResponseFunc<T:EnumValue> = (world:World<T>, col:Collision<T>, 
+    rect:IRect, goal:IVector2<Float>, filter:ColFilterFunc<T>)->ResponseData<T>;
 
+/**
+    Function signature for a collision filter.
+**/
 typedef ColFilterFunc<T:EnumValue> = (item:T, other:T)->CollisionKind;
 
 typedef ItemQueryInfo<T:EnumValue> = {item:T, ti1:Float, ti2:Float, weight:Float};
 
+/**
+    Result of an attempted move.
+**/
 typedef MoveResult<T:EnumValue> = {actualX:Float, actualY:Float, cols:Array<Collision<T>>}
 
 class World<T:EnumValue> {
@@ -70,64 +97,101 @@ class World<T:EnumValue> {
     var nonEmptyCells = new Map<Cell<T>, Bool>();
     var responses = new Map<CollisionKind, ResponseFunc<T>>();
 
+    var collisionArrayPool:Pool<Array<Collision<T>>>;
+    var rectSegmentIntersectionPool:Pool<RectSegmentIntersection>;
+    var rectPool:Pool<MRect>;
+    var pointPool:Pool<MVectorFloat2>;
+    var pointIntPool:Pool<MVectorInt2>;
+    var segmentPool:Pool<MLineSegment>;
+
+    final originPoint = new VectorFloat2();
+
     public function new(cellSize:Int) {
         this.cellSize = cellSize;
-        switch assertIsPosNum(this.cellSize, "cellSize") {
-            case Failure(_): this.cellSize = 64;
-            case Success(_): {}
-        }
+        if (this.cellSize < 0) this.cellSize = 64;
         responses[SLIDE] = slide;
         responses[TOUCH] = touch;
         responses[CROSS] = cross;
         responses[BOUNCE] = bounce;
+
+        collisionArrayPool = new Pool(collisionArrayConstructor, collisionArrayInit);
+        rectSegmentIntersectionPool = new Pool(rectSegmentIntersectionConstructor);
+        rectPool = new Pool(rectConstructor, rectInit);
+        pointPool = new Pool(pointConstructor, pointInit);
+        pointIntPool = new Pool(pointIntConstructor, pointIntInit);
+        segmentPool = new Pool(segmentConstructor, segmentInit);
     }
 
-    function sign(x:Float):Int {
-        return x > 0 ? 1 : (x == 0 ? 0 : -1);
+    inline function collisionArrayConstructor<T:EnumValue>():Array<Collision<T>> {
+        return [];
     }
-    
-    function nearest(x:Float, a:Float, b:Float):Float {
-        return (Math.abs(a-x) < Math.abs(b-x)) ? a : b;
+
+    function collisionArrayInit<T:EnumValue>(x:Array<Collision<T>>):Array<Collision<T>> {
+        while (x.length > 0) x.pop();
+        return x;
     }
-    
-    function assertIsPosNum(val:Float, name:String):Outcome<Noise, Error> {
-        if (val <= 0) {
-            return Failure(new Error('${name} must be a positive number but was ${val}.'));
-        }
-        else {
-            return Success(Noise);
-        }
+
+    inline function rectSegmentIntersectionConstructor():RectSegmentIntersection {
+        return {
+            ti1:0,
+            ti2:0,
+            nx1:0,
+            ny1:0,
+            nx2:0,
+            ny2:0
+        };
     }
-    
-    function assertIsRect(x:Float, y:Float, w:Float, h:Float):Outcome<Noise, Error> {
-        switch assertIsPosNum(w, "w") {
-            case Failure(failure): return Failure(failure);
-            case Success(_): {}
-        }
-        switch assertIsPosNum(h, "h") {
-            case Failure(failure): return Failure(failure);
-            case Success(_): {}
-        }
-        return Success(Noise);
+
+    inline function rectConstructor():MRect {
+        return new MRect();
     }
+
+    inline function rectInit(rect:MRect):MRect {
+        return rect.init();
+    }
+
+    inline function pointConstructor():MVectorFloat2 {
+        return new MVectorFloat2();
+    }
+
+    inline function pointInit(point:MVectorFloat2):MVectorFloat2 {
+        return point.init(0,0);
+    }
+
+    inline function pointIntConstructor():MVectorInt2 {
+        return new MVectorInt2();
+    }
+
+    inline function pointIntInit(point:MVectorInt2):MVectorInt2 {
+        return point.init(0,0);
+    }
+
+    inline function segmentConstructor():MLineSegment {
+        return new MLineSegment();
+    }
+
+    inline function segmentInit(segment:MLineSegment):MLineSegment {
+        return segment.init();
+    }
+
     
     function defaultFilter(item:T, other:T):CollisionKind {
         return SLIDE;
     }
     
-    function rectGetSegmentIntersectionIndices(rect:Rect, seg:LineSegment, ?ti1:Float, 
+    function rectGetSegmentIntersectionIndices(rect:IRect, seg:ILineSegment, ?ti1:Float, 
     ?ti2:Float):haxe.ds.Option<RectSegmentIntersection>
     {
         if (ti1 == null) ti1 = 0.;
         if (ti2 == null) ti2 = 1.;
         var dx = seg.x2-seg.x1;
         var dy = seg.y2-seg.y1;
-        var nx = 0.;
-        var ny = 0.;
-        var nx1 = 0.;
-        var ny1 = 0.;
-        var nx2 = 0.;
-        var ny2 = 0.;
+        var nx = 0;
+        var ny = 0;
+        var nx1 = 0;
+        var ny1 = 0;
+        var nx2 = 0;
+        var ny2 = 0;
         var p = 0.;
         var q = 0.;
         var r = 0.;
@@ -138,25 +202,25 @@ class World<T:EnumValue> {
                     nx = -1;
                     ny = 0;
                     p = -dx;
-                    q = seg.x1 - rect.x;
+                    q = seg.x1 - rect.leftX;
                 }
                 case 2: {
                     nx = 1;
                     ny = 0;
                     p = dx;
-                    q = rect.x + rect.w - seg.x1;
+                    q = rect.rightX - seg.x1;
                 }
                 case 3: {
                     nx = 0;
                     ny = -1;
                     p = -dy;
-                    q = seg.y1 - rect.y;
+                    q = seg.y1 - rect.topY;
                 }
                 case 4: {
                     nx = 0;
                     ny = 1;
                     p = dy;
-                    q = rect.y + rect.h - seg.y1;
+                    q = rect.bottomY - seg.y1;
                 }
             }
             if (p == 0) {
@@ -182,67 +246,48 @@ class World<T:EnumValue> {
                 }
             }
         }
-    
-        return Some({
-            ti1:ti1,
-            ti2:ti2,
-            nx1:nx1,
-            ny1:ny1,
-            nx2:nx2,
-            ny2:ny2
-        });
+        
+        var result = rectSegmentIntersectionPool.get();
+        result.ti1 = ti1;
+        result.ti2 = ti2;
+        result.nx1 = nx1;
+        result.ny1 = ny1;
+        result.nx2 = nx2;
+        result.ny2 = ny2;
+        return Some(result);
     }
     
-    function rectGetDiff(rect1:Rect, rect2:Rect):Rect 
+    function rectGetSquareDist(rect1:IRect, rect2:IRect):Float
     {
-        return {
-            x:rect2.x - rect1.x - rect1.w,
-            y:rect2.y - rect1.y - rect1.h,
-            w:rect1.w + rect2.w,
-            h:rect1.h + rect2.h
-        }
-    }
-    
-    function rectContainsPoint(rect:Rect, point:VectorFloat2):Bool
-    {
-        return point.x - rect.x > Math.FP_ERR() && point.y - rect.y > Math.FP_ERR() 
-            && rect.x + rect.w - point.x > Math.FP_ERR() 
-            && rect.y + rect.h - point.y > Math.FP_ERR();
-    }
-    
-    function rectIsIntersecting(rect1:Rect, rect2:Rect):Bool
-    {
-        return rect1.x < rect2.x+rect2.w && rect2.x < rect1.x+rect1.w 
-            && rect1.y < rect2.y+rect2.h && rect2.y < rect1.y+rect1.h;
-    }
-    
-    function rectGetSquareDist(rect1:Rect, rect2:Rect):Float
-    {
-        var dx = rect1.x - rect2.x + (rect1.w - rect2.w)/2;
-        var dy = rect1.y - rect2.y + (rect1.h - rect2.h)/2;
+        var dx = rect1.leftX - rect2.leftX + (rect1.width - rect2.width)/2;
+        var dy = rect1.topY - rect2.topY + (rect1.height - rect2.height)/2;
         return dx*dx + dy*dy;
     }
     
-    function rectDetectCollision(rect1:Rect, rect2:Rect, goal:VectorFloat2):haxe.ds.Option<Collision<T>>
+    function rectDetectCollision(rect1:Rect, rect2:Rect, goal:IVector2<Float>):haxe.ds.Option<Collision<T>>
     {
-        var dx = goal.x - rect1.x;
-        var dy = goal.y - rect1.y;
-        var rectDiff = rectGetDiff(rect1, rect2);
+        var dx = goal.x - rect1.leftX;
+        var dy = goal.y - rect1.topY;
+        var rectDiff = rectPool.get()
+            .initFrom(rect1);
+        rectDiff.diffWith(rect2, rectDiff);
         var overlaps = false;
         var ti:Null<Float> = null;
-        var nx = 0.;
-        var ny = 0.;
-        var originPoint = {x:0., y:0.};
-        if (rectContainsPoint(rectDiff, originPoint)) {
+        var nx = 0;
+        var ny = 0;
+        if (rectDiff.containsPoint(originPoint.x, originPoint.y)) {
             //item was intersecting other
-            var point = rectDiff.nearestCornerTo(originPoint.x, originPoint.y);
-            var wi = Math.min(rect1.w, Math.abs(point.x));
-            var hi = Math.min(rect1.h, Math.abs(point.y));
+            var point = pointPool.get();
+            rectDiff.nearestCornerTo(originPoint.x, originPoint.y, point);
+            var wi = Math.min(rect1.width, Math.abs(point.x));
+            var hi = Math.min(rect1.height, Math.abs(point.y));
             ti = -wi * hi;
             overlaps = true;
+            pointPool.put(point);
         }
         else {
-            var seg = {x1:0., y1:0., x2:dx, y2:dy};
+            var seg = segmentPool.get();
+            seg.init(0, 0, dx, dy);
             var segInt = rectGetSegmentIntersectionIndices(rectDiff, 
                 seg, Math.NEGATIVE_INFINITY, Math.POSITIVE_INFINITY);
             switch segInt {
@@ -256,9 +301,11 @@ class World<T:EnumValue> {
                         ny = segInt.ny1;
                         overlaps = false;
                     }
+                    rectSegmentIntersectionPool.put(segInt);
                 }
                 case None: {}
             }
+            segmentPool.put(seg);
         }
         if (ti == null) return None;
         var tx = 0.;
@@ -266,62 +313,73 @@ class World<T:EnumValue> {
         if (overlaps) {
             if (dx == 0 && dy == 0) {
                 //intersecting and not moving - use minimum displacement vector
-                var point = rectDiff.nearestCornerTo(originPoint.x, originPoint.y);
+                var point = pointPool.get();
+                rectDiff.nearestCornerTo(originPoint.x, originPoint.y, point);
                 if (Math.abs(point.x) < Math.abs(point.y)) {
                     point.y = 0;
                 }
                 else {
                     point.x = 0;
                 }
-                nx = sign(point.x);
-                ny = sign(point.y);
+                nx = Math.sign(point.x);
+                ny = Math.sign(point.y);
+                pointPool.put(point);
             }
             else {
                 //intersecting and moving - move in opposite direction
-                var seg = {x1:0., y1:0., x2:dx, y2:dy};
-                var segInt =  rectGetSegmentIntersectionIndices(rectDiff, seg, 
+                var seg = segmentPool.get();
+                seg.init(0, 0, dx, dy);
+                var segInt = rectGetSegmentIntersectionIndices(rectDiff, seg, 
                     Math.NEGATIVE_INFINITY, 1);
+                segmentPool.put(seg);
                 switch segInt {
                     case None: return None;
                     case Some(segInt): {
-                        tx = rect1.x + dx * segInt.ti1;
-                        ty = rect1.y + dy * segInt.ti1;
+                        tx = rect1.leftX + dx * segInt.ti1;
+                        ty = rect1.topY + dy * segInt.ti1;
+                        rectSegmentIntersectionPool.put(segInt);
                     }
                 }
             }
         }
         else {
             //tunnel
-            tx = rect1.x + dx * ti;
-            ty = rect1.y + dy * ti;
+            tx = rect1.leftX + dx * ti;
+            ty = rect1.topY + dy * ti;
         }
+
+        rectPool.put(rectDiff);
     
         return Some({
             overlaps:overlaps,
             ti:ti,
-            move:{x:dx, y:dy},
-            normal:{x:nx, y:ny},
-            touch:{x:tx, y:ty},
+            moveX:dx,
+            moveY:dy,
+            normalX:nx,
+            normalY:ny,
+            touchX:tx,
+            touchY:ty,
             item:null,
-            itemRect:{x:rect1.x, y:rect1.y, w:rect1.w, h:rect1.h},
+            itemRect:rect1,
             other:null,
-            otherRect:{x:rect2.x, y:rect2.y, w:rect2.w, h:rect2.h},
-            kind:NONE
+            otherRect:rect2,
+            kind:NONE,
+            slideX:None,
+            slideY:None,
+            bounceX:None,
+            bounceY:None
         });
     }
     
-    function gridToWorld(cellSize:Int, point:VectorInt2):VectorFloat2 {
-        return {
-            x: (point.x-1)*cellSize,
-            y: (point.y-1)*cellSize
-        }
+    function gridToWorld(cellSize:Int, point:IVector2<Int>):MVectorFloat2 {
+        return pointPool.get()
+            .init((point.x-1)*cellSize, (point.y-1)*cellSize);
     }
     
-    function gridToCell(cellSize:Int, point:VectorFloat2):VectorInt2 {
-        return {
-            x:Math.floor(point.x / cellSize) + 1,
-            y:Math.floor(point.y / cellSize) + 1
-        }
+    function gridToCell(cellSize:Int, point:IVector2<Float>):MVectorInt2 {
+        return pointIntPool.get()
+            .init(Math.floor(point.x / cellSize) + 1,
+                Math.floor(point.y / cellSize) + 1);
     }
 
     function sortByWeight(a:ItemQueryInfo<T>, b:ItemQueryInfo<T>):Int {
@@ -349,12 +407,12 @@ class World<T:EnumValue> {
         }
     }
     
-    function gridTraverse(cellSize:Int, p1:VectorFloat2, p2:VectorFloat2, f:(cell:VectorInt2)->Void):Void {
+    function gridTraverse(cellSize:Int, p1:VectorFloat2, p2:VectorFloat2, f:(cell:MVectorInt2)->Void):Void {
         var cell1 = gridToCell(cellSize, p1);
         var cell2 = gridToCell(cellSize, p2);
         var tDataX = gridTraverseInitStep(cellSize, cell1.x, p1.x, p2.x);
         var tDataY = gridTraverseInitStep(cellSize, cell1.y, p1.y, p2.y);
-        var cell = {x:cell1.x, y:cell1.y};
+        var cell = cell1.clone();
         f(cell);
         // The default implementation had an infinite loop problem when
         // approaching the last cell in some occassions. We finish iterating
@@ -381,29 +439,30 @@ class World<T:EnumValue> {
         if (cell.x != cell2.x || cell.y != cell2.y) f(cell2);
     }
     
-    function gridToCellRect(cellSize:Int, rect:Rect):Rect {
-        var cell = gridToCell(cellSize, {x:rect.x, y:rect.y});
-        var cr = Math.ceil((rect.x+rect.w) / cellSize);
-        var cb = Math.ceil((rect.y+rect.h) / cellSize);
-        return {x:cell.x, y:cell.y, w:cr - cell.x + 1, h:cb - cell.y + 1}
+    function gridToCellRect(cellSize:Int, rect:IRect):Rect {
+
+        var cell = gridToCell(cellSize, new VectorFloat2(rect.leftX, rect.topY));
+        var cr = Math.ceil((rect.rightX) / cellSize);
+        var cb = Math.ceil((rect.bottomY) / cellSize);
+        return new Rect(cell.x, cell.y, cr - cell.x + 1, cb - cell.y + 1);
     }
 
-    function touch(world:World<T>, col:Collision<T>, rect:Rect, goal:VectorFloat2, 
+    function touch(world:World<T>, col:Collision<T>, rect:IRect, goal:IVector2<Float>,
     filter:ColFilterFunc<T>):ResponseData<T>
     {
-        return {goal:{x:col.touch.x, y:col.touch.y}, cols:new Array<Collision<T>>()}
+        return {goalX:col.touchX, goalY:col.touchY, cols:new Array<Collision<T>>()}
     }
     
-    function cross(world:World<T>, col:Collision<T>, rect:Rect, goal:VectorFloat2, 
+    function cross(world:World<T>, col:Collision<T>, rect:IRect, goal:IVector2<Float>, 
     filter:ColFilterFunc<T>):ResponseData<T>
     {
         return {
-            goal:{x:goal.x, y:goal.y},
+            goal:new VectorFloat2(goal.x, goal.y),
             cols:world.project(col.item, rect, goal, filter)
         }
     }
     
-    function slide(world:World<T>, col:Collision<T>, rect:Rect, goal:VectorFloat2, 
+    function slide(world:World<T>, col:Collision<T>, rect:IRect, goal:IVector2<Float>, 
     filter:ColFilterFunc<T>):ResponseData<T> 
     {
         var newGoal = {x:goal.x, y:goal.y};
@@ -416,14 +475,14 @@ class World<T:EnumValue> {
             }
         }
         col.slide = {x:newGoal.x, y:newGoal.y}
-        var newRect = {x:col.touch.x, y:col.touch.y, w:rect.w, h:rect.h}
+        var newRect = {x:col.touch.x, y:col.touch.y, w:rect.width, h:rect.height}
         return {
             goal: newGoal,
             cols: world.project(col.item, newRect, newGoal, filter)
         }
     }
     
-    function bounce(world:World<T>, col:Collision<T>, rect:Rect, goal:VectorFloat2, 
+    function bounce(world:World<T>, col:Collision<T>, rect:IRect, goal:IVector2<Float>, 
     filter:ColFilterFunc<T>):ResponseData<T> 
     {
         var newGoal = {x:goal.x, y:goal.y};
@@ -442,7 +501,7 @@ class World<T:EnumValue> {
             by = col.touch.y + bny;
         }
         col.bounce = {x:bx, y:by};
-        var newRect = {x:col.touch.x, y:col.touch.y, w:rect.w, h:rect.h}
+        var newRect = {x:col.touch.x, y:col.touch.y, w:rect.width, h:rect.height}
         newGoal.x = bx;
         newGoal.y = by;
         return {goal:newGoal, cols:world.project(col.item, newRect, newGoal, filter)}
@@ -482,10 +541,10 @@ class World<T:EnumValue> {
 
     function getDictItemsInCellRect(cellRect:Rect):Map<T, Bool> {
         var itemsDict = new Map<T, Bool>();
-        for (cy in Std.int(cellRect.y)...Std.int(cellRect.y+cellRect.h)) {
+        for (cy in Std.int(cellRect.y)...Std.int(cellRect.y+cellRect.height)) {
             if (!rows.exists(cy)) continue;
             var row = rows[cy];
-            for (cx in Std.int(cellRect.x)...Std.int(cellRect.x+cellRect.w)) {
+            for (cx in Std.int(cellRect.x)...Std.int(cellRect.x+cellRect.width)) {
                 if (!row.exists(cx)) continue;
                 var cell = row[cx];
                 if (cell.itemCount <= 0) continue;
@@ -565,15 +624,15 @@ class World<T:EnumValue> {
     public function project(item:T, rect:Rect, goal:VectorFloat2, 
     ?filter:ColFilterFunc<T>):Array<Collision<T>>
     {
-        assertIsRect(rect.x, rect.y, rect.w, rect.h).sure();
+        assertIsRect(rect.x, rect.y, rect.width, rect.height).sure();
         if (filter == null) filter = defaultFilter;
         var collisions = new Array<Collision<T>>();
         var visited = new Map<T, Bool>();
         visited[item] = true;
         var tl = Math.min(goal.x, rect.x);
         var tt = Math.min(goal.y, rect.y);
-        var tr = Math.max(goal.x+rect.w, rect.x+rect.w);
-        var tb = Math.max(goal.y+rect.h, rect.y+rect.h);
+        var tr = Math.max(goal.x+rect.width, rect.x+rect.width);
+        var tb = Math.max(goal.y+rect.height, rect.y+rect.height);
         var tw = tr-tl;
         var th = tb-tt;
         var tRect = {x:tl, y:tt, w:tw, h:th}
@@ -635,7 +694,7 @@ class World<T:EnumValue> {
     public function getRect(item:T):Outcome<Rect, Error> {
         if (rects.exists(item)) {
             var _rect = rects[item];
-            return Success({x:_rect.x, y:_rect.y, w:_rect.w, h:_rect.h});
+            return Success({x:_rect.x, y:_rect.y, w:_rect.width, h:_rect.height});
         }
         else {
             return Failure(new Error('Item ${item} must be added to the world before getting its rect. Use World.add() to add it first.'));
@@ -662,8 +721,8 @@ class World<T:EnumValue> {
         }
         rects[item] = {x:x, y:y, w:w, h:h};
         var cellRect = gridToCellRect(cellSize, rects[item]);
-        for (cy in Std.int(cellRect.y)...Std.int(cellRect.y+cellRect.h)) {
-            for (cx in Std.int(cellRect.x)...Std.int(cellRect.x+cellRect.w)) {
+        for (cy in Std.int(cellRect.y)...Std.int(cellRect.y+cellRect.height)) {
+            for (cx in Std.int(cellRect.x)...Std.int(cellRect.x+cellRect.width)) {
                 addItemToCell(item, {x:cx, y:cy});
             }
         }
@@ -675,8 +734,8 @@ class World<T:EnumValue> {
         var rect = getRect(item).sure();
         rects.remove(item);
         var cellRect = gridToCellRect(cellSize, rect);
-        for (cy in Std.int(cellRect.y)...Std.int(cellRect.y+cellRect.h)) {
-            for (cx in Std.int(cellRect.x)...Std.int(cellRect.x+cellRect.w)) {
+        for (cy in Std.int(cellRect.y)...Std.int(cellRect.y+cellRect.height)) {
+            for (cx in Std.int(cellRect.x)...Std.int(cellRect.x+cellRect.width)) {
                 removeItemFromCell(item, {x:cx, y:cy});
             }
         }
@@ -691,30 +750,30 @@ class World<T:EnumValue> {
             case Failure(failure): return Failure(failure);
             case Success(_): rect1 = rects[item];
         }
-        if (w2 == null) w2 = rect1.w;
-        if (h2 == null) h2 = rect1.h;
+        if (w2 == null) w2 = rect1.width;
+        if (h2 == null) h2 = rect1.height;
         switch assertIsRect(x2, y2, w2, h2) {
             case Failure(failure): return Failure(failure);
             case Success(_): {}
         }
-        if (rect1.x == x2 && rect1.y == y2 && rect1.w == w2 && rect1.h == h2) {
+        if (rect1.x == x2 && rect1.y == y2 && rect1.width == w2 && rect1.height == h2) {
             return Success(Noise);
         }
         var cellRect1 = gridToCellRect(cellSize, rect1);
         var cellRect2 = gridToCellRect(cellSize, {x:x2, y:y2, w:w2, h:h2});
         if (cellRect1.x == cellRect2.x && cellRect1.y == cellRect2.y
-        && cellRect1.w == cellRect2.w && cellRect1.h == cellRect2.h)
+        && cellRect1.width == cellRect2.width && cellRect1.height == cellRect2.height)
         {
             rect1.x = x2;
             rect1.y = y2;
-            rect1.w = w2;
-            rect1.h = h2;
+            rect1.width = w2;
+            rect1.height = h2;
             return Success(Noise);
         }
-        var cr1 = cellRect1.x + cellRect1.w;
-        var cb1 = cellRect1.y + cellRect1.h;
-        var cr2 = cellRect2.x + cellRect2.w;
-        var cb2 = cellRect2.y + cellRect2.h;
+        var cr1 = cellRect1.x + cellRect1.width;
+        var cb1 = cellRect1.y + cellRect1.height;
+        var cr2 = cellRect2.x + cellRect2.width;
+        var cb2 = cellRect2.y + cellRect2.height;
         var cyOut = false;
         for (cy in Std.int(cellRect1.y)...Std.int(cb1)) {
             cyOut = cy < cellRect2.y || cy > cb2;
@@ -734,8 +793,8 @@ class World<T:EnumValue> {
         }
         rect1.x = x2;
         rect1.y = y2;
-        rect1.w = w2;
-        rect1.h = h2;
+        rect1.width = w2;
+        rect1.height = h2;
         return Success(Noise);
     }
 
