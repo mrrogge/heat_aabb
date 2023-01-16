@@ -1,5 +1,6 @@
 package heat.aabb;
 
+using tink.CoreApi;
 using heat.AllCore;
 
 class MRect implements IRect {
@@ -99,6 +100,13 @@ class MRect implements IRect {
         offset = new MVectorFloat2(offsetX, offsetY);
     }
 
+    public function init(x=0., y=0., width=0., height=0., offsetX=0., offsetY=0.):MRect {
+        pos.init(x, y);
+        dim.init(width, height);
+        offset.init(offsetX, offsetY);
+        return this;
+    }
+
     public static inline function fromXYWH(x=0., y=0., w=0., h=0.):MRect {
         return new MRect(x, y, w, h, 0, 0);
     }
@@ -107,33 +115,45 @@ class MRect implements IRect {
         return new MRect(x, y, width, height, offsetX, offsetY);
     }
 
-    public inline function nearestCornerTo(x:Float, y:Float):MVectorFloat2 {
-        return new MVectorFloat2(Math.nearest(x, leftX, rightX), 
-            Math.nearest(y, topY, bottomY));
+    public function initFrom(other:IRect):MRect {
+        pos.init(other.x, other.y);
+        dim.init(other.width, other.height);
+        offset.init(other.offsetX, other.offsetY);
+        return this;
     }
 
-    public static inline function diff(r1:IRect, r2:IRect):MRect {
-        return new MRect(r2.leftX - r1.rightX,
+    public inline function nearestCornerTo(x:Float, y:Float, 
+    ?dest:MVectorFloat2):MVectorFloat2 
+    {
+        if (dest == null) dest = new MVectorFloat2();
+        return dest.init(
+            Math.nearest(x, leftX, rightX), 
+            Math.nearest(y, topY, bottomY)
+        );
+    }
+
+    public static function diff(r1:IRect, r2:IRect, ?dest:MRect):MRect {
+        if (dest == null) dest = new MRect();
+        return dest.init(r2.leftX - r1.rightX,
             r2.topY - r1.bottomY,
             r1.width + r2.width,
             r1.height + r2.height,
             0, 0);
     }
 
-    public inline function diffWith(other:IRect):MRect {
-
-        return diff(this, other);
+    public inline function diffWith(other:IRect, ?dest:MRect):MRect {
+        return diff(this, other, dest);
     }
 
-    public inline function offsetTo(offsetX:Float, offsetY:Float):Rect {
-        return new Rect(leftX + offsetX, topY + offsetY, width, height, offsetX, offsetY);
+    public inline function offsetTo(offsetX:Float, offsetY:Float):MRect {
+        return this.init(leftX + offsetX, topY + offsetY, width, height, offsetX, offsetY);
     }
 
-    public inline function normalize():Rect {
+    public inline function normalize():MRect {
         return offsetTo(0, 0);
     }
 
-    public inline function centerOffset():Rect {
+    public inline function centerOffset():MRect {
         return offsetTo(width/2, height/2);
     }
 
