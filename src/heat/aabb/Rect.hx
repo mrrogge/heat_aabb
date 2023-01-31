@@ -53,14 +53,21 @@ class Rect implements IRect {
     public final dim:VectorFloat2;
     public final offset:VectorFloat2;
 
-    public function new(x=0., y=0., width=0., height=0., offsetX=0., offsetY=0.) {
-        pos = new VectorFloat2(x, y);
-        dim = new VectorFloat2(width, height);
-        offset = new VectorFloat2(offsetX, offsetY);
+    /**
+        Construct a new Rect from the specified position, dimensions, and offset.
+    **/
+    public function new(?pos:IVector2<Float>, ?dim:IVector2<Float>, ?offset:IVector2<Float>) {
+        this.pos = pos == null ? new VectorFloat2(0, 0) : new VectorFloat2(pos.x, pos.y);
+        this.dim = dim == null ? new VectorFloat2(0, 0) : new VectorFloat2(dim.x, dim.y);
+        this.offset = offset == null ? new VectorFloat2(0, 0) : new VectorFloat2(offset.x, offset.y);
     }
 
-    public static inline function fromXYWH(x=0., y=0., w=0., h=0.):Rect {
-        return new Rect(x, y, w, h, 0, 0);
+    /**
+        Build a new Rect from the specified components.
+    **/
+    public static inline function fromComponents(x=0., y=0., w=0., h=0., offsetX=0., offsetY=0.):Rect {
+        return new Rect(new VectorFloat2(x, y), new VectorFloat2(w, h), 
+            new VectorFloat2(offsetX, offsetY));
     }
 
     public static inline function areSame(r1:IRect, r2:IRect):Bool {
@@ -86,54 +93,73 @@ class Rect implements IRect {
     }
     
     public inline function clone():Rect {
-        return new Rect(x, y, width, height, offsetX, offsetY);
+        return new Rect(pos, dim, offset);
     }
 
-    public inline function nearestCornerTo(x:Float, y:Float):VectorFloat2 {
-        return new VectorFloat2(Math.nearest(x, leftX, rightX), 
-            Math.nearest(y, topY, bottomY));
+    /**
+        Return a vector corresponding to the corner nearest to point.
+    **/
+    public inline function nearestCornerToPoint(point:IVector2<Float>):VectorFloat2 {
+        return new VectorFloat2(Math.nearest(point.x, leftX, rightX), 
+            Math.nearest(point.y, topY, bottomY));
     }
 
-    /// Compute the Minkowski sum of two rectangles, resulting in a new rectangle.
+    /** 
+        Compute the Minkowski sum of two rectangles, resulting in a new rectangle.
+    **/
     public static inline function sum(r1:IRect, r2:IRect):Rect {
-        return new Rect(r1.leftX + r2.leftX,
-            r1.topY + r2.topY,
-            r1.width + r2.width,
-            r1.height + r2.height,
-            0, 0);
+        return new Rect(new VectorFloat2(r1.leftX+r2.leftX, r1.topY+r2.topY),
+            new VectorFloat2(r1.width+r2.width, r1.height+r2.height));
     }
 
+    /**
+        Compute the Minkowski difference between two rectangles, resulting in a new rectangle.
+    **/
     public static inline function diff(r1:IRect, r2:IRect):Rect {
-        return new Rect(r2.leftX - r1.rightX,
-            r2.topY - r1.bottomY,
-            r1.width + r2.width,
-            r1.height + r2.height,
-            0, 0);
+        return new Rect(new VectorFloat2(r2.leftX-r1.rightX, r2.topY-r1.bottomY),
+            new VectorFloat2(r1.width+r2.width, r1.height+r2.height));
     }
 
+    /**
+        Compute the Minkowski difference between this rectangle and another rectangle.
+    **/
     public inline function diffWith(other:IRect):Rect {
         return diff(this, other);
     }
 
-    public inline function offsetTo(offsetX:Float, offsetY:Float):Rect {
-        return new Rect(leftX + offsetX, topY + offsetY, width, height, offsetX, offsetY);
+    /**
+        Return a new Rect occupying same area as this Rect but with a different offset position.
+    **/
+    public inline function offsetTo(offset:IVector2<Float>):Rect {
+        return new Rect(new VectorFloat2(leftX+offset.x, topY+offset.y),
+            dim, new VectorFloat2(offset.x, offset.y));
     }
 
     public inline function normalize():Rect {
-        return offsetTo(0, 0);
+        return offsetTo(new VectorFloat2(0,0));
     }
 
     public inline function centerOffset():Rect {
-        return offsetTo(width/2, height/2);
+        return offsetTo(new VectorFloat2(width/2, height/2));
     }
 
-    public inline function containsPoint(x:Float, y:Float):Bool {
-        return x - leftX >= Math.FP_ERR() && y - topY >= Math.FP_ERR()
-            && rightX - x >= Math.FP_ERR() && bottomY - y >= Math.FP_ERR();
+    public inline function containsPoint(point:IVector2<Float>):Bool {
+        return point.x - leftX >= Math.FP_ERR() 
+            && point.y - topY >= Math.FP_ERR()
+            && rightX - point.x >= Math.FP_ERR() 
+            && bottomY - point.y >= Math.FP_ERR();
     }
 
     public inline function intersectsWithRect(other:IRect):Bool {
         return leftX < other.rightX && other.leftX < rightX
             && topY < other.bottomY && other.topY < bottomY;
+    }
+
+    public inline function toMutable():MRect {
+        return new MRect(pos, dim, offset);
+    }
+
+    public static inline function fromMutable(mutable:MRect):Rect {
+        return new Rect(mutable.pos, mutable.dim, mutable.offset);
     }
 }
