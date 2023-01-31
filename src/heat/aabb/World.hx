@@ -3,6 +3,8 @@ package heat.aabb;
 using tink.CoreApi;
 using heat.AllCore;
 
+typedef EntityId = Int;
+
 /**
     Kinds of collisions
 **/
@@ -15,131 +17,395 @@ enum CollisionKind {
     OTHER(kind:String);
 }
 
-/**
-    Represents a cell in the spatial map. Each cell owns a Map of the items contained within it.
-**/
-typedef Cell<T:EnumValue> = {itemCount:Int, cell:VectorInt2, items:Map<T, Bool>}
+private class Cell {
+    public final index:VectorInt2;
+    public final items = new Map<EntityId, Bool>();
+    public var itemCount(default, null) = 0;
+
+    public function new(index:IVector2<Int>) {
+        this.index = new VectorInt2(index.x, index.y);
+    }
+
+    public function addItem(item:EntityId):Void {
+        if (!items.exists(item)) {
+            items[item] = true;
+            itemCount += 1;
+        }
+    }
+
+    public function removeItem(item:EntityId):Outcome<Noise, Error> {
+        return if (items.remove(item)) {
+            itemCount -= 1;
+            Success(Noise);
+        }
+        else {
+            Failure(new Error("Item not found in cell"));
+        }
+    }
+}
 
 /**
     Defines an intersection between a rectangle and a line segment.
 **/
-typedef RectSegmentIntersection = {
-    ti1:Float,
-    ti2:Float,
-    nx1:Int,
-    ny1:Int,
-    nx2:Int,
-    ny2:Int
+private class RectSegmentIntersection {
+    public var ti1 = 0.;
+    public var ti2 = 0.;
+    public final normal1 = new MVectorInt2();
+    public final normal2 = new MVectorInt2();
+
+    public function new() {}
+
+    public function init():RectSegmentIntersection {
+        ti1 = 0.;
+        ti2 = 0.;
+        normal1.init();
+        normal2.init();
+        return this;
+    }
+}
+
+/**
+    Holds the results of a collision between two rects.
+**/
+private class Collision {
+    public final movingRect = new MRect();
+    public final otherRect = new MRect();
+
+    // This is set to true if the two rects were already overlapping before the move.
+    public var wasOverlapping = false;
+
+    // This specifies how far in to the move the collision occurred - 0=immediately, 1=at the very end of the move.
+    public var ti = 0.;
+
+    public final move = new MVectorFloat2();
+    public final normal = new MVectorInt2();
+    public final touch = new MVectorFloat2();
+    public final slide = new MVectorFloat2();
+    public final bounce = new MVectorFloat2();
+
+    public var kind:CollisionKind = NONE;
+
+    public function new() {}
+
+    public function init():Collision {
+        movingRect.init();
+        otherRect.init();
+        wasOverlapping = false;
+        ti = 0;
+        move.init();
+        normal.init();
+        touch.init();
+        slide.init();
+        bounce.init();
+        kind = NONE;
+        return this;
+    }
 }
 
 /**
     Data for a single collision instance.
 **/
-typedef Collision<T:EnumValue> = {
-    overlaps:Bool,
-    ti:Float,
-    moveX:Float,
-    moveY:Float,
-    normalX:Int,
-    normalY:Int,
-    touchX:Float,
-    touchY:Float,
-    item:T,
-    itemRect:Rect,
-    other:T,
-    otherRect:Rect,
-    kind:CollisionKind,
-    slideX:Option<Float>,
-    slideY:Option<Float>,
-    bounceX:Option<Float>,
-    bounceY:Option<Float>
-}
+// typedef Collision = {
+//     overlaps:Bool,
+//     ti:Float,
+//     moveX:Float,
+//     moveY:Float,
+//     normalX:Int,
+//     normalY:Int,
+//     touchX:Float,
+//     touchY:Float,
+//     item:EntityId,
+//     itemRect:Rect,
+//     other:EntityId,
+//     otherRect:Rect,
+//     kind:CollisionKind,
+//     slideX:Option<Float>,
+//     slideY:Option<Float>,
+//     bounceX:Option<Float>,
+//     bounceY:Option<Float>
+// }
 
 // grid_traverse* functions are based on "A Fast Voxel Traversal Algorithm for Ray Tracing",
 // by John Amanides and Andrew Woo - http://www.cse.yorku.ca/~amana/research/grid.pdf
 // It has been modified to include both cells when the ray "touches a grid corner",
 // and with a different exit condition
 
-typedef GridTraversalData = {
+private typedef GridTraversalData = {
     step:Int,
     td:Float,
     tmax:Float
 }
 
-typedef ResponseData<T:EnumValue> = {
+typedef ResponseData = {
     goalX:Float,
     goalY:Float,
-    cols:Array<Collision<T>>
+    cols:Array<Collision>
 }
 
 /**
     Function signature for a collision response.
 **/
-typedef ResponseFunc<T:EnumValue> = (world:World<T>, col:Collision<T>, 
-    rect:IRect, goal:IVector2<Float>, filter:ColFilterFunc<T>)->ResponseData<T>;
+typedef ResponseFunc = (world:World, col:Collision, 
+    rect:IRect, goalX:Float, goalY:Float, filter:ColFilterFunc)->ResponseData;
 
 /**
     Function signature for a collision filter.
 **/
-typedef ColFilterFunc<T:EnumValue> = (item:T, other:T)->CollisionKind;
+typedef ColFilterFunc = (item:EntityId, other:EntityId)->CollisionKind;
 
-typedef ItemQueryInfo<T:EnumValue> = {item:T, ti1:Float, ti2:Float, weight:Float};
+typedef ItemQueryInfo = {item:EntityId, ti1:Float, ti2:Float, weight:Float};
 
 /**
     Result of an attempted move.
 **/
-typedef MoveResult<T:EnumValue> = {actualX:Float, actualY:Float, cols:Array<Collision<T>>}
+typedef MoveResult = {actualX:Float, actualY:Float, cols:Array<Collision>}
 
-class World<T:EnumValue> {
-    var cellSize:Int;
-    var rects = new Map<T, Rect>();
-    var rows = new Map<Int, Map<Int, Cell<T>>>();
-    var nonEmptyCells = new Map<Cell<T>, Bool>();
-    var responses = new Map<CollisionKind, ResponseFunc<T>>();
+class World {
+    public final cellSize:Int;
 
-    var collisionArrayPool:Pool<Array<Collision<T>>>;
-    var rectSegmentIntersectionPool:Pool<RectSegmentIntersection>;
-    var rectPool:Pool<MRect>;
-    var pointPool:Pool<MVectorFloat2>;
-    var pointIntPool:Pool<MVectorInt2>;
-    var segmentPool:Pool<MLineSegment>;
+    final rects = new Map<EntityId, MRect>();
+    final rows = new Map<Int, Map<Int, Cell>>();
+    final nonEmptyCells = new Map<Cell, Bool>();
+    final responses = new Map<CollisionKind, ResponseFunc>();
 
-    final originPoint = new VectorFloat2();
+    final collisionArrayPool:Pool<Array<Collision>>;
+    final collisionPool:Pool<Collision>;
+    final rectSegmentIntersectionPool:Pool<RectSegmentIntersection>;
+    final rectPool:Pool<MRect>;
+    final pointPool:Pool<MVectorFloat2>;
+    final pointIntPool:Pool<MVectorInt2>;
+    final segmentPool:Pool<MLineSegment>;
+    final mapIdToBoolPool:Pool<Map<EntityId, Bool>>;
 
-    public function new(cellSize:Int) {
-        this.cellSize = cellSize;
-        if (this.cellSize < 0) this.cellSize = 64;
-        responses[SLIDE] = slide;
-        responses[TOUCH] = touch;
-        responses[CROSS] = cross;
-        responses[BOUNCE] = bounce;
+    public function new(cellSize=64) {
+        this.cellSize = cellSize <= 0 ? 64 : cellSize;
+
+        // responses[SLIDE] = slide;
+        // responses[TOUCH] = touch;
+        // responses[CROSS] = cross;
+        // responses[BOUNCE] = bounce;
 
         collisionArrayPool = new Pool(collisionArrayConstructor, collisionArrayInit);
-        rectSegmentIntersectionPool = new Pool(rectSegmentIntersectionConstructor);
+        collisionPool = new Pool(collisionConstructor, collisionInit);
+        rectSegmentIntersectionPool = new Pool(
+            rectSegmentIntersectionConstructor,
+            rectSegmentIntersectionInit
+        );
         rectPool = new Pool(rectConstructor, rectInit);
         pointPool = new Pool(pointConstructor, pointInit);
         pointIntPool = new Pool(pointIntConstructor, pointIntInit);
         segmentPool = new Pool(segmentConstructor, segmentInit);
+        mapIdToBoolPool = new Pool(mapIdToBoolConstructor, mapIdToBoolInit);
     }
 
-    inline function collisionArrayConstructor<T:EnumValue>():Array<Collision<T>> {
+    public function add(item:EntityId, rect:IRect):Outcome<Noise, Error> {
+        if (rects.exists(item)) {
+            return Failure(itemNotAddedError(item));
+        }
+        rects[item] = rectPool.get().init(rect.pos, rect.dim, rect.offset);
+        var cellRect = convertWorldRectToCellCoords(rects[item]);
+        var cellIndex = pointIntPool.get();
+        for (cellRow in Std.int(cellRect.topY)...Std.int(cellRect.bottomY)+1) {
+            for (cellCol in Std.int(cellRect.leftX)...Std.int(cellRect.rightX)+1) {
+                addItemToCell(item, cellIndex.init(cellCol, cellRow));
+            }
+        }
+        rectPool.put(cellRect);
+        pointIntPool.put(cellIndex);
+        return Success(Noise);
+    }
+
+    public function getRect(item:EntityId):Outcome<Rect, Error> {
+        if (rects.exists(item)) {
+            return Success(rects[item].toImmutable());
+        }
+        else {
+            return Failure(itemNotAddedError(item));
+        }
+    }
+
+    function itemNotAddedError(item:EntityId):Error {
+        return new Error(NotFound, 'Item ${item} not added');
+    }
+
+    public function update(item:EntityId, pos:IVector2<Float>, ?dim:IVector2<Float>, ?offset:IVector2<Float>)
+    :Outcome<Noise, Error>
+    {
+        var rect1 = if (rects.exists(item)) {
+            rects[item];
+        }
+        else {
+            return Failure(itemNotAddedError(item));
+        }
+        var rect2 = rectPool.get().initPos(pos)
+            .initDim(dim == null ? rect1.dim : dim)
+            .initOffset(offset == null ? rect1.offset : offset);
+
+        // If item hasn't moved, return early
+        if (Rect.areSame(rect1, rect2)) {
+            rectPool.put(rect2);
+            return Success(Noise);
+        }
+
+        var cellRect1 = convertWorldRectToCellCoords(rect1);
+        var cellRect2 = convertWorldRectToCellCoords(rect2);
+        
+        // If item has not moved into any different cells, return early
+        if (Rect.areSame(cellRect1, cellRect2)) {
+            rect1.initFrom(rect2);
+            rectPool.put(rect2).put(cellRect1).put(cellRect2);
+            return Success(Noise);
+        }
+
+        var cellIndex = pointIntPool.get();
+        for (cellRow in Std.int(cellRect1.topY)...Std.int(cellRect1.bottomY)+1) {
+            for (cellCol in Std.int(cellRect1.leftX)...Std.int(cellRect1.rightX)+1) {
+                removeItemFromCell(item, cellIndex.init(cellCol, cellRow));
+            }
+        }
+        for (cellRow in Std.int(cellRect2.topY)...Std.int(cellRect2.bottomY)+1) {
+            for (cellCol in Std.int(cellRect2.leftX)...Std.int(cellRect2.rightX)+1) {
+                addItemToCell(item, cellIndex.init(cellCol, cellRow));
+            }
+        }
+
+        rect1.initFrom(rect2);
+        rectPool.put(rect2).put(cellRect1).put(cellRect2);
+        pointIntPool.put(cellIndex);
+
+        return Success(Noise);
+    }
+
+    public function remove(item:EntityId):Outcome<Noise, Error> {
+        if (!rects.exists(item)) return Failure(itemNotAddedError(item));
+        var rect = rects[item];
+        rects.remove(item);
+        var cellRect = convertWorldRectToCellCoords(rect);
+        var cellIndex = pointIntPool.get();
+        for (cellRow in Std.int(cellRect.topY)...Std.int(cellRect.bottomY)+1) {
+            for (cellCol in Std.int(cellRect.leftX)...Std.int(cellRect.rightX)+1) {
+                removeItemFromCell(item, cellIndex.init(cellCol, cellRow));
+            }
+        }
+
+        rectPool.put(rect).put(cellRect);
+        pointIntPool.put(cellIndex);
+
+        return Success(Noise);
+    }
+
+    public function project(item:EntityId, rect:IRect, goal:IVector2<Float>,
+    ?filter:ColFilterFunc):Array<Collision>
+    {
+        if (filter == null) filter = defaultFilter;
+        var collisions = collisionArrayPool.get();
+        var visited = mapIdToBoolPool.get();
+        visited[item] = true;
+        // Construct a cell rectangle range that encompasses the projected item and the goal position. This determines which items to test for collisions.
+        var rectLeftX = Math.min(goal.x, rect.leftX);
+        var rectTopY = Math.min(goal.y, rect.topY);
+        var rectRightX = Math.max(goal.x+rect.width, rect.rightX);
+        var rectBottomY = Math.max(goal.y+rect.height, rect.bottomY);
+        var rectWidth = rectRightX-rectLeftX;
+        var rectHeight = rectBottomY-rectTopY;
+        var rect = rectPool.get();
+        rect.pos.init(rectLeftX, rectTopY);
+        rect.dim.init(rectWidth, rectHeight);
+        var cellRect = convertWorldRectToCellCoords(rect);
+
+        // Find all items in all checked cells. Test for collisions against these and collect all the resulting collisions.
+        var itemsInCellRect = getDictItemsInCellRect(cellRect);
+        for (other => _ in itemsInCellRect) {
+            if (visited.exists(other)) continue;
+            visited[other] = true;
+            var colKind = filter(item, other);
+            switch colKind {
+                case NONE: continue;
+                case SLIDE, BOUNCE, CROSS, TOUCH, OTHER(_): {
+                    #if heat_assert if (!rects.exists(other)) throw new Error(); #end
+                    var otherRect = rects[other];
+                    var col = rectDetectCollision(rect, otherRect, goal);
+                    switch col {
+                        case None: {}
+                        case Some(col): {
+                            col.other = other;
+                            col.item = item;
+                            col.kind = colKind;
+                            collisions.push(col);
+                        }
+                    }
+                }
+            }
+        }
+        collisions.sort(sortByTiAndDistance);
+
+        mapIdToBoolPool.put(visited).put(itemsInCellRect);
+        rectPool.put(tRect).put(cellRect);
+
+        return collisions;
+    }
+
+    public function check(item:EntityId, goal:IVector2<Float>,
+    ?filter:ColFilterFunc):Outcome<MoveResult, Error>
+    {
+        if (filter == null) filter = defaultFilter;
+        var visited = mapIdToBoolPool.get();
+        visited[item] = true;
+        // TODO: can this function be factored out somehow?
+        var visitedFilter = function(itm:T, other:T):CollisionKind {
+            if (visited.exists(other)) return NONE;
+            return filter(itm, other);
+        }
+        var result:MoveResult<T> = {
+            actualX: 0,
+            actualY: 0,
+            cols: []
+        }
+        var rect = if (this.rects.exists(item)) {
+            this.rects[item];
+        }  
+        else {
+            mapIdToBoolPool.put(visited);
+            return Failure(itemNotAddedError(item));
+        }
+        var projectedCols = project(item, rect, goal, visitedFilter);
+        while (projectedCols.length > 0) {
+            var col = projectedCols[0];
+            result.cols.push(col);
+            visited[col.other] = true;
+            var response = responses[col.kind];
+            var responseData = response(this, col, rect, goal, visitedFilter);
+            goal = responseData.goal;
+            projectedCols = responseData.cols;
+        }
+        result.actualX = goal.x;
+        result.actualY = goal.y;
+        return Success(result);
+    }
+
+    inline function collisionConstructor():Collision {
+        return new Collision();
+    }
+
+    inline function collisionInit(col:Collision):Collision {
+        return col.init();
+    }
+
+    inline function collisionArrayConstructor():Array<Collision> {
         return [];
     }
 
-    function collisionArrayInit<T:EnumValue>(x:Array<Collision<T>>):Array<Collision<T>> {
+    function collisionArrayInit(x:Array<Collision>):Array<Collision> {
         while (x.length > 0) x.pop();
         return x;
     }
 
     inline function rectSegmentIntersectionConstructor():RectSegmentIntersection {
-        return {
-            ti1:0,
-            ti2:0,
-            nx1:0,
-            ny1:0,
-            nx2:0,
-            ny2:0
-        };
+        return new RectSegmentIntersection();
+    }
+
+    function rectSegmentIntersectionInit(int:RectSegmentIntersection):RectSegmentIntersection {
+        return int.init();
     }
 
     inline function rectConstructor():MRect {
@@ -174,16 +440,23 @@ class World<T:EnumValue> {
         return segment.init();
     }
 
+    inline function mapIdToBoolConstructor():Map<EntityId, Bool> {
+        return [];
+    }
+
+    inline function mapIdToBoolInit(map:Map<EntityId, Bool>):Map<EntityId, Bool> {
+        map.clear();
+        return map;
+    }
+
     
-    function defaultFilter(item:T, other:T):CollisionKind {
+    function defaultFilter(item:EntityId, other:EntityId):CollisionKind {
         return SLIDE;
     }
     
-    function rectGetSegmentIntersectionIndices(rect:IRect, seg:ILineSegment, ?ti1:Float, 
-    ?ti2:Float):haxe.ds.Option<RectSegmentIntersection>
+    function rectGetSegmentIntersectionIndices(rect:IRect, seg:ILineSegment, ti1=0., 
+    ti2=1.):haxe.ds.Option<RectSegmentIntersection>
     {
-        if (ti1 == null) ti1 = 0.;
-        if (ti2 == null) ti2 = 1.;
         var dx = seg.x2-seg.x1;
         var dy = seg.y2-seg.y1;
         var nx = 0;
@@ -250,10 +523,10 @@ class World<T:EnumValue> {
         var result = rectSegmentIntersectionPool.get();
         result.ti1 = ti1;
         result.ti2 = ti2;
-        result.nx1 = nx1;
-        result.ny1 = ny1;
-        result.nx2 = nx2;
-        result.ny2 = ny2;
+        result.normal1.x = nx1;
+        result.normal1.y = ny1;
+        result.normal2.x = nx2;
+        result.normal2.y = ny2;
         return Some(result);
     }
     
@@ -264,111 +537,91 @@ class World<T:EnumValue> {
         return dx*dx + dy*dy;
     }
     
-    function rectDetectCollision(rect1:Rect, rect2:Rect, goal:IVector2<Float>):haxe.ds.Option<Collision<T>>
+    function rectDetectCollision(rect1:IRect, rect2:IRect, goal:IVector2<Float>):haxe.ds.Option<Collision>
     {
-        var dx = goal.x - rect1.leftX;
-        var dy = goal.y - rect1.topY;
+        var col = collisionPool.get();
+        var displacement = pointPool.get().init(goal.x-rect1.x, goal.y-rect1.y);
         var rectDiff = rectPool.get()
             .initFrom(rect1);
         rectDiff.diffWith(rect2, rectDiff);
-        var overlaps = false;
-        var ti:Null<Float> = null;
-        var nx = 0;
-        var ny = 0;
-        if (rectDiff.containsPoint(originPoint.x, originPoint.y)) {
-            //item was intersecting other
-            var point = pointPool.get();
-            rectDiff.nearestCornerTo(originPoint.x, originPoint.y, point);
-            var wi = Math.min(rect1.width, Math.abs(point.x));
-            var hi = Math.min(rect1.height, Math.abs(point.y));
-            ti = -wi * hi;
-            overlaps = true;
-            pointPool.put(point);
+        col.wasOverlapping = rectDiff.containsPoint(VectorFloat2.ORIGIN);
+        if (col.wasOverlapping) {
+            var nearestCorner = rectDiff.nearestCornerTo(VectorFloat2.ORIGIN, 
+                pointPool.get());
+            var wi = Math.min(rect1.width, Math.abs(nearestCorner.x));
+            var hi = Math.min(rect1.height, Math.abs(nearestCorner.y));
+            col.ti = -wi * hi;
+
+            if (displacement.lengthSquared() == 0) {
+                //intersecting and not moving - use minimum displacement vector
+                if (Math.abs(nearestCorner.x) < Math.abs(nearestCorner.y)) {
+                    col.normal.x = Math.sign(nearestCorner.x);
+                    col.normal.y = 0;
+                    col.touch.x = rect1.x + nearestCorner.x;
+                    col.touch.y = rect1.y;
+                }
+                else {
+                    col.normal.x = 0;
+                    col.normal.y = Math.sign(nearestCorner.y);
+                    col.touch.x = rect1.x;
+                    col.touch.y = rect1.y + nearestCorner.y;
+                }
+            }
+            else {
+                //intersecting and moving - move in opposite direction
+                var seg = segmentPool.get().init(0, 0, displacement.x, displacement.y);
+                var segInt = rectGetSegmentIntersectionIndices(rectDiff, seg, 
+                    Math.NEGATIVE_INFINITY, 1);
+                segmentPool.put(seg);
+                switch segInt {
+                    case None: {
+                        pointPool.put(nearestCorner);
+                        rectPool.put(rectDiff);
+                        return None;
+                    }
+                    case Some(segInt): {
+                        col.normal.initFrom(segInt.normal1);
+                        col.touch.x = rect1.x + displacement.x * segInt.ti1;
+                        col.touch.y = rect1.y + displacement.y * segInt.ti1;
+                        rectSegmentIntersectionPool.put(segInt);
+                    }
+                }
+            }
+            pointPool.put(nearestCorner);
         }
         else {
-            var seg = segmentPool.get();
-            seg.init(0, 0, dx, dy);
+            var seg = segmentPool.get().init(0, 0, displacement.x, displacement.y);
             var segInt = rectGetSegmentIntersectionIndices(rectDiff, 
                 seg, Math.NEGATIVE_INFINITY, Math.POSITIVE_INFINITY);
+            segmentPool.put(seg);
             switch segInt {
+                case None: {
+                    rectPool.put(rectDiff);
+                    return None;
+                }
                 case Some(segInt): {
                     if (segInt.ti1 < 1 
                     && Math.abs(segInt.ti1 - segInt.ti2) >= Math.FP_ERR() 
                     && (0 < segInt.ti1 + Math.FP_ERR() || 0 == segInt.ti1 && segInt.ti2 > 0))
                     {
-                        ti = segInt.ti1;
-                        nx = segInt.nx1;
-                        ny = segInt.ny1;
-                        overlaps = false;
+                        col.ti = segInt.ti1;
+                        col.normal.initFrom(segInt.normal1);
+                        col.touch.x = rect1.x + displacement.x * col.ti;
+                        col.touch.y = rect1.y + displacement.y * col.ti;
+                    }
+                    else {
+                        rectSegmentIntersectionPool.put(segInt);
+                        rectPool.put(rectDiff);
+                        return None;
                     }
                     rectSegmentIntersectionPool.put(segInt);
                 }
-                case None: {}
             }
-            segmentPool.put(seg);
-        }
-        if (ti == null) return None;
-        var tx = 0.;
-        var ty = 0.;
-        if (overlaps) {
-            if (dx == 0 && dy == 0) {
-                //intersecting and not moving - use minimum displacement vector
-                var point = pointPool.get();
-                rectDiff.nearestCornerTo(originPoint.x, originPoint.y, point);
-                if (Math.abs(point.x) < Math.abs(point.y)) {
-                    point.y = 0;
-                }
-                else {
-                    point.x = 0;
-                }
-                nx = Math.sign(point.x);
-                ny = Math.sign(point.y);
-                pointPool.put(point);
-            }
-            else {
-                //intersecting and moving - move in opposite direction
-                var seg = segmentPool.get();
-                seg.init(0, 0, dx, dy);
-                var segInt = rectGetSegmentIntersectionIndices(rectDiff, seg, 
-                    Math.NEGATIVE_INFINITY, 1);
-                segmentPool.put(seg);
-                switch segInt {
-                    case None: return None;
-                    case Some(segInt): {
-                        tx = rect1.leftX + dx * segInt.ti1;
-                        ty = rect1.topY + dy * segInt.ti1;
-                        rectSegmentIntersectionPool.put(segInt);
-                    }
-                }
-            }
-        }
-        else {
-            //tunnel
-            tx = rect1.leftX + dx * ti;
-            ty = rect1.topY + dy * ti;
         }
 
         rectPool.put(rectDiff);
     
-        return Some({
-            overlaps:overlaps,
-            ti:ti,
-            moveX:dx,
-            moveY:dy,
-            normalX:nx,
-            normalY:ny,
-            touchX:tx,
-            touchY:ty,
-            item:null,
-            itemRect:rect1,
-            other:null,
-            otherRect:rect2,
-            kind:NONE,
-            slideX:None,
-            slideY:None,
-            bounceX:None,
-            bounceY:None
-        });
+        return Some(col);
     }
     
     function gridToWorld(cellSize:Int, point:IVector2<Int>):MVectorFloat2 {
@@ -376,17 +629,22 @@ class World<T:EnumValue> {
             .init((point.x-1)*cellSize, (point.y-1)*cellSize);
     }
     
-    function gridToCell(cellSize:Int, point:IVector2<Float>):MVectorInt2 {
-        return pointIntPool.get()
-            .init(Math.floor(point.x / cellSize) + 1,
-                Math.floor(point.y / cellSize) + 1);
+    /**
+        Converts from a point in world coordinates to cell coordinates.
+
+        Points that are right on the edge between two cells are considered to be within only the cell furthest to the right and down.
+    **/
+    function convertWorldPointToCellCoords(point:IVector2<Float>, ?dest:MVectorInt2):MVectorInt2 {
+        if (dest == null) dest = pointIntPool.get();
+        return dest.init(Math.floor(point.x / cellSize),
+            Math.floor(point.y / cellSize));
     }
 
-    function sortByWeight(a:ItemQueryInfo<T>, b:ItemQueryInfo<T>):Int {
+    function sortByWeight(a:ItemQueryInfo, b:ItemQueryInfo):Int {
         return a.weight < b.weight ? -1 : a.weight == b.weight ? 0 : 1;
     }
 
-    function sortByTiAndDistance(a:Collision<T>, b:Collision<T>):Int {
+    function sortByTiAndDistance(a:Collision, b:Collision):Int {
         var ad = rectGetSquareDist(a.itemRect, a.otherRect);
         var bd = rectGetSquareDist(a.itemRect, b.otherRect);
         return ad < bd ? -1 : (ad == bd) ? 0 : 1;
@@ -408,8 +666,8 @@ class World<T:EnumValue> {
     }
     
     function gridTraverse(cellSize:Int, p1:VectorFloat2, p2:VectorFloat2, f:(cell:MVectorInt2)->Void):Void {
-        var cell1 = gridToCell(cellSize, p1);
-        var cell2 = gridToCell(cellSize, p2);
+        var cell1 = convertWorldPointToCellCoords(cellSize, p1);
+        var cell2 = convertWorldPointToCellCoords(cellSize, p2);
         var tDataX = gridTraverseInitStep(cellSize, cell1.x, p1.x, p2.x);
         var tDataY = gridTraverseInitStep(cellSize, cell1.y, p1.y, p2.y);
         var cell = cell1.clone();
@@ -439,114 +697,132 @@ class World<T:EnumValue> {
         if (cell.x != cell2.x || cell.y != cell2.y) f(cell2);
     }
     
-    function gridToCellRect(cellSize:Int, rect:IRect):Rect {
-
-        var cell = gridToCell(cellSize, new VectorFloat2(rect.leftX, rect.topY));
-        var cr = Math.ceil((rect.rightX) / cellSize);
-        var cb = Math.ceil((rect.bottomY) / cellSize);
-        return new Rect(cell.x, cell.y, cr - cell.x + 1, cb - cell.y + 1);
+    /**
+        For the specified rect in world coordinates, return a rect corresponding to the cell indices that rect occupies.
+    **/
+    function convertWorldRectToCellCoords(rect:IRect, ?dest:MRect):MRect {
+        if (dest == null) dest = rectPool.get();
+        var rectTopLeft = pointPool.get().init(rect.leftX, rect.topY);
+        var rectBottomRight = pointPool.get().init(rect.rightX, rect.bottomY);
+        var topLeftCell = convertWorldPointToCellCoords(rectTopLeft);
+        var bottomRightCell = convertWorldPointToCellCoords(rectBottomRight);
+        #if heat_assert 
+        if (topLeftCell.x > bottomRightCell.x) throw new Error();
+        if (topLeftCell.y > bottomRightCell.y) throw new Error();
+        #end
+        dest.pos.init(topLeftCell.x, topLeftCell.y);
+        dest.dim.init(bottomRightCell.x-topLeftCell.x, bottomRightCell.y-topLeftCell.y);
+        dest.offset.init(0, 0);
+        pointPool.put(rectTopLeft).put(rectBottomRight);
+        pointIntPool.put(topLeftCell).put(bottomRightCell);
+        return dest;
     }
 
-    function touch(world:World<T>, col:Collision<T>, rect:IRect, goal:IVector2<Float>,
-    filter:ColFilterFunc<T>):ResponseData<T>
+    function touch(world:World, col:Collision, rect:IRect, goalX:Float, 
+    goalY:Float, filter:ColFilterFunc):ResponseData
     {
         return {goalX:col.touchX, goalY:col.touchY, cols:new Array<Collision<T>>()}
     }
     
-    function cross(world:World<T>, col:Collision<T>, rect:IRect, goal:IVector2<Float>, 
-    filter:ColFilterFunc<T>):ResponseData<T>
+    function cross(world:World, col:Collision, rect:IRect, goalX:Float, 
+    goalY:Float, filter:ColFilterFunc):ResponseData
     {
         return {
-            goal:new VectorFloat2(goal.x, goal.y),
-            cols:world.project(col.item, rect, goal, filter)
+            goalX:goalX,
+            goalY:goalY,
+            cols:world.project(col.item, rect, goalX, goalY, filter)
         }
     }
     
-    function slide(world:World<T>, col:Collision<T>, rect:IRect, goal:IVector2<Float>, 
-    filter:ColFilterFunc<T>):ResponseData<T> 
+    function slide(world:World, col:Collision, rect:IRect, goalX:Float,
+    goalY:Float, filter:ColFilterFunc):ResponseData 
     {
-        var newGoal = {x:goal.x, y:goal.y};
-        if (col.move.x != 0 || col.move.y != 0) {
-            if (col.normal.x != 0) {
-                newGoal.x = col.touch.x;
+        var newGoal = pointPool.get();
+        if (col.moveX != 0 || col.moveY != 0) {
+            if (col.normalX != 0) {
+                newGoal.x = col.touchX;
             }
             else {
-                newGoal.y = col.touch.y;
+                newGoal.y = col.touchY;
             }
         }
-        col.slide = {x:newGoal.x, y:newGoal.y}
-        var newRect = {x:col.touch.x, y:col.touch.y, w:rect.width, h:rect.height}
-        return {
-            goal: newGoal,
-            cols: world.project(col.item, newRect, newGoal, filter)
-        }
+        col.slideX = Some(newGoal.x);
+        col.slideY = Some(newGoal.y);
+        var newRect = rectPool.get().init(col.touchX, col.touchY, rect.width, rect.height);
+        var result = {
+            goalX: newGoal.x,
+            goalY: newGoal.y,
+            cols:world.project(col.item, newRect, newGoal, filter)
+        };
+        return result;
     }
     
-    function bounce(world:World<T>, col:Collision<T>, rect:IRect, goal:IVector2<Float>, 
-    filter:ColFilterFunc<T>):ResponseData<T> 
+    function bounce(world:World, col:Collision, rect:IRect, goal:IVector2<Float>, 
+    filter:ColFilterFunc):ResponseData 
     {
-        var newGoal = {x:goal.x, y:goal.y};
-        var bx = col.touch.x;
-        var by = col.touch.y;
-        if (col.move.x != 0 || col.move.y != 0) {
-            var bnx = newGoal.x - col.touch.x;
-            var bny = newGoal.y - col.touch.y;
-            if (col.normal.x == 0) {
+        var newGoal = pointPool.get().init(goal.x, goal.y);
+        var bx = col.touchX;
+        var by = col.touchY;
+        if (col.moveX != 0 || col.moveY != 0) {
+            var bnx = newGoal.x - col.touchX;
+            var bny = newGoal.y - col.touchY;
+            if (col.normalX == 0) {
                 bny *= -1;
             }
             else {
                 bnx *= -1;
             }
-            bx = col.touch.x + bnx;
-            by = col.touch.y + bny;
+            bx = col.touchX + bnx;
+            by = col.touchY + bny;
         }
-        col.bounce = {x:bx, y:by};
-        var newRect = {x:col.touch.x, y:col.touch.y, w:rect.width, h:rect.height}
+        col.bounceX = Some(bx);
+        col.bounceY = Some(by);
+        var newRect = rectPool.get()
+            .init(col.touchX, col.touchY, rect.width, rect.height);
         newGoal.x = bx;
         newGoal.y = by;
-        return {goal:newGoal, cols:world.project(col.item, newRect, newGoal, filter)}
+        return {
+            goalX:newGoal.x,
+            goalY:newGoal.y,
+            cols:world.project(col.item, newRect, newGoal, filter)
+        }
     }
 
-    function addItemToCell(item:T, cell:VectorInt2) {
-        if (this.rows[cell.y] == null) this.rows[cell.y] = new Map<Int, Cell<T>>();
-        var row = this.rows[cell.y];
-        if (row[cell.x] == null) {
-            row[cell.x] = {
-                itemCount: 0,
-                cell: {x:cell.x, y:cell.y},
-                items: new Map<T, Bool>()
-            }
+    function addItemToCell(item:EntityId, index:IVector2<Int>) {
+        if (!this.rows.exists(index.y)) this.rows[index.y] = new Map<Int, Cell>();
+        var row = this.rows[index.y];
+        if (!row.exists(index.x)) {
+            row[index.x] = new Cell(index);
         }
-        var cell = row[cell.x];
+        var cell = row[index.x];
         nonEmptyCells[cell] = true;
-        if (!cell.items.exists(item)) {
-            cell.items[item] = true;
-            cell.itemCount += 1;
-        }
+        cell.addItem(item);
     }
 
-    function removeItemFromCell(item:T, cell:VectorInt2):Outcome<Noise, Error> {
-        var row = rows[cell.y];
-        if (row == null) return Failure(new Error("Row is empty"));
-        if (!row.exists(cell.x)) return Failure(new Error("Column is empty"));
-        var cell = row[cell.x];
-        if (!cell.items.exists(item)) return Failure(new Error("Item not found in cell"));
-        cell.items.remove(item);
-        cell.itemCount -= 1;
+    function removeItemFromCell(item:EntityId, index:IVector2<Int>):Outcome<Noise, Error> {
+        if (!rows.exists(index.y)) return Failure(new Error(NotFound, "Row is empty"));
+        var row = rows[index.y];
+        if (!row.exists(index.x)) return Failure(new Error(NotFound, "Column is empty"));
+        var cell = row[index.x];
+        if (!cell.items.exists(item)) return Failure(new Error(NotFound, "Item not found in cell"));
+        cell.removeItem(item);
         if (cell.itemCount <= 0) {
             nonEmptyCells.remove(cell);
         }
         return Success(Noise);
     }
 
-    function getDictItemsInCellRect(cellRect:Rect):Map<T, Bool> {
-        var itemsDict = new Map<T, Bool>();
-        for (cy in Std.int(cellRect.y)...Std.int(cellRect.y+cellRect.height)) {
-            if (!rows.exists(cy)) continue;
-            var row = rows[cy];
-            for (cx in Std.int(cellRect.x)...Std.int(cellRect.x+cellRect.width)) {
-                if (!row.exists(cx)) continue;
-                var cell = row[cx];
+    /**
+        Returns a map where keys are all EntityIds currently found within all cells contained within cellRect.
+    **/
+    function getDictItemsInCellRect(cellRect:IRect):Map<EntityId, Bool> {
+        var itemsDict = mapIdToBoolPool.get();
+        for (cellRow in Std.int(cellRect.topY)...Std.int(cellRect.bottomY)+1) {
+            if (!this.rows.exists(cellRow)) continue;
+            var row = this.rows[cellRow];
+            for (cellCol in Std.int(cellRect.leftX)...Std.int(cellRect.rightX)+1) {
+                if (!row.exists(cellCol)) continue;
+                var cell = row[cellCol];
                 if (cell.itemCount <= 0) continue;
                 for (item => _ in cell.items) {
                     itemsDict[item] = true;
@@ -573,7 +849,7 @@ class World<T:EnumValue> {
     }
 
     function getInfoAboutItemsTouchedBySegment(seg:LineSegment, 
-    ?filter:(item:T)->Bool):Array<ItemQueryInfo<T>>
+    ?filter:(item:EntityId)->Bool):Array<ItemQueryInfo>
     {
         var cells = getCellsTouchedBySegment(seg);
         var rect:Rect;
@@ -617,50 +893,8 @@ class World<T:EnumValue> {
         return itemQueryInfos;
     }
 
-    public function addResponse(colKind:String, response:ResponseFunc<T>) {
+    public function addResponse(colKind:String, response:ResponseFunc) {
         responses[OTHER(colKind)] = response;
-    }
-
-    public function project(item:T, rect:Rect, goal:VectorFloat2, 
-    ?filter:ColFilterFunc<T>):Array<Collision<T>>
-    {
-        assertIsRect(rect.x, rect.y, rect.width, rect.height).sure();
-        if (filter == null) filter = defaultFilter;
-        var collisions = new Array<Collision<T>>();
-        var visited = new Map<T, Bool>();
-        visited[item] = true;
-        var tl = Math.min(goal.x, rect.x);
-        var tt = Math.min(goal.y, rect.y);
-        var tr = Math.max(goal.x+rect.width, rect.x+rect.width);
-        var tb = Math.max(goal.y+rect.height, rect.y+rect.height);
-        var tw = tr-tl;
-        var th = tb-tt;
-        var tRect = {x:tl, y:tt, w:tw, h:th}
-        var cellRect = gridToCellRect(cellSize, tRect);
-        var itemsInCellRect = getDictItemsInCellRect(cellRect);
-        for (other => _ in itemsInCellRect) {
-            if (visited.exists(other)) continue;
-            visited[other] = true;
-            var colKind = filter(item, other);
-            switch colKind {
-                case NONE: continue;
-                case SLIDE, BOUNCE, CROSS, TOUCH, OTHER(_): {
-                    var otherRect = rects[other];
-                    var col = rectDetectCollision(rect, otherRect, goal);
-                    switch col {
-                        case None: {}
-                        case Some(col): {
-                            col.other = other;
-                            col.item = item;
-                            col.kind = colKind;
-                            collisions.push(col);
-                        }
-                    }
-                }
-            }
-        }
-        collisions.sort(sortByTiAndDistance);
-        return collisions;
     }
 
     public function countCells():Int {
@@ -673,11 +907,11 @@ class World<T:EnumValue> {
         return count;
     }
 
-    public function hasItem(item:T):Bool {
+    public inline function hasItem(item:EntityId):Bool {
         return rects.exists(item);
     }
 
-    public function getItems():Array<T> {
+    public function getItems():Array<EntityId> {
         var items = new Array<T>();
         for (item => _ in rects) {
             items.push(item);
@@ -691,115 +925,8 @@ class World<T:EnumValue> {
         return count;
     }
 
-    public function getRect(item:T):Outcome<Rect, Error> {
-        if (rects.exists(item)) {
-            var _rect = rects[item];
-            return Success({x:_rect.x, y:_rect.y, w:_rect.width, h:_rect.height});
-        }
-        else {
-            return Failure(new Error('Item ${item} must be added to the world before getting its rect. Use World.add() to add it first.'));
-        }
-    }
-
-    public function toWorld(cellPoint:VectorInt2):VectorFloat2 {
-        return gridToWorld(cellSize, cellPoint);
-    }
-
-    public function toCell(point:VectorFloat2):VectorInt2 {
-        return gridToCell(cellSize, point);
-    }
-
-    public function add(item:T, x:Float, y:Float, w:Float, h:Float)
-    :Outcome<Noise, Error> 
-    {
-        if (rects.exists(item)) {
-            return Failure(new Error("Item already added to world."));
-        }
-        switch assertIsRect(x, y, w, h) {
-            case Failure(failure): return Failure(failure);
-            case Success(_): {}
-        }
-        rects[item] = {x:x, y:y, w:w, h:h};
-        var cellRect = gridToCellRect(cellSize, rects[item]);
-        for (cy in Std.int(cellRect.y)...Std.int(cellRect.y+cellRect.height)) {
-            for (cx in Std.int(cellRect.x)...Std.int(cellRect.x+cellRect.width)) {
-                addItemToCell(item, {x:cx, y:cy});
-            }
-        }
-        return Success(Noise);
-    }
-
-    public function remove(item:T):Outcome<Noise, Error> {
-        if (!rects.exists(item)) return Failure(new Error("Item not in world."));
-        var rect = getRect(item).sure();
-        rects.remove(item);
-        var cellRect = gridToCellRect(cellSize, rect);
-        for (cy in Std.int(cellRect.y)...Std.int(cellRect.y+cellRect.height)) {
-            for (cx in Std.int(cellRect.x)...Std.int(cellRect.x+cellRect.width)) {
-                removeItemFromCell(item, {x:cx, y:cy});
-            }
-        }
-        return Success(Noise);
-    }
-
-    public function update(item:T, x2:Float, y2:Float, ?w2:Float, ?h2:Float)
-    :Outcome<Noise, Error>
-    {
-        var rect1:Rect;
-        switch getRect(item) {
-            case Failure(failure): return Failure(failure);
-            case Success(_): rect1 = rects[item];
-        }
-        if (w2 == null) w2 = rect1.width;
-        if (h2 == null) h2 = rect1.height;
-        switch assertIsRect(x2, y2, w2, h2) {
-            case Failure(failure): return Failure(failure);
-            case Success(_): {}
-        }
-        if (rect1.x == x2 && rect1.y == y2 && rect1.width == w2 && rect1.height == h2) {
-            return Success(Noise);
-        }
-        var cellRect1 = gridToCellRect(cellSize, rect1);
-        var cellRect2 = gridToCellRect(cellSize, {x:x2, y:y2, w:w2, h:h2});
-        if (cellRect1.x == cellRect2.x && cellRect1.y == cellRect2.y
-        && cellRect1.width == cellRect2.width && cellRect1.height == cellRect2.height)
-        {
-            rect1.x = x2;
-            rect1.y = y2;
-            rect1.width = w2;
-            rect1.height = h2;
-            return Success(Noise);
-        }
-        var cr1 = cellRect1.x + cellRect1.width;
-        var cb1 = cellRect1.y + cellRect1.height;
-        var cr2 = cellRect2.x + cellRect2.width;
-        var cb2 = cellRect2.y + cellRect2.height;
-        var cyOut = false;
-        for (cy in Std.int(cellRect1.y)...Std.int(cb1)) {
-            cyOut = cy < cellRect2.y || cy > cb2;
-            for (cx in Std.int(cellRect1.x)...Std.int(cr1)) {
-                if (cyOut || cx < cellRect2.x || cx > cr2) {
-                    removeItemFromCell(item, {x:cx, y:cy});
-                }
-            }
-        }
-        for (cy in Std.int(cellRect2.y)...Std.int(cb2)) {
-            cyOut = cy < cellRect1.y || cy > cb1;
-            for (cx in Std.int(cellRect2.x)...Std.int(cr2)) {
-                if (cyOut || cx < cellRect1.x || cx > cr1) {
-                    addItemToCell(item, {x:cx, y:cy});
-                }
-            }
-        }
-        rect1.x = x2;
-        rect1.y = y2;
-        rect1.width = w2;
-        rect1.height = h2;
-        return Success(Noise);
-    }
-
-    public function move(item:T, goalX:Float, goalY:Float, 
-    ?filter:ColFilterFunc<T>):Outcome<MoveResult<T>, Error> {
+    public function move(item:EntityId, goalX:Float, goalY:Float, 
+    ?filter:ColFilterFunc):Outcome<MoveResult, Error> {
         switch check(item, goalX, goalY, filter) {
             case Failure(failure): return Failure(failure);
             case Success(checkResult): {
@@ -809,43 +936,6 @@ class World<T:EnumValue> {
                 }
             }
         }
-    }
-
-    public function check(item:T, goalX:Float, goalY:Float,
-    ?filter:ColFilterFunc<T>):Outcome<MoveResult<T>, Error>
-    {
-        if (filter == null) filter = defaultFilter;
-        var visited = new Map<T, Bool>();
-        visited[item] = true;
-        var visitedFilter = function(itm:T, other:T):CollisionKind {
-            if (visited.exists(other)) return NONE;
-            return filter(itm, other);
-        }
-        var result:MoveResult<T> = {
-            actualX: 0,
-            actualY: 0,
-            cols: []
-        }
-        var rectOutcome = getRect(item);
-        var rect:Rect;
-        switch rectOutcome {
-            case Failure(failure): return Failure(failure);
-            case Success(r): rect = r;
-        }
-        var goal = {x:goalX, y:goalY}
-        var projectedCols = project(item, rect, goal, visitedFilter);
-        while (projectedCols.length > 0) {
-            var col = projectedCols[0];
-            result.cols.push(col);
-            visited[col.other] = true;
-            var response = responses[col.kind];
-            var responseData = response(this, col, rect, goal, visitedFilter);
-            goal = responseData.goal;
-            projectedCols = responseData.cols;
-        }
-        result.actualX = goal.x;
-        result.actualY = goal.y;
-        return Success(result);
     }
 }
 
