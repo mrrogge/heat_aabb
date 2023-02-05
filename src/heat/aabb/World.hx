@@ -398,7 +398,7 @@ class World {
         }
     }
     
-    function gridTraverse(cellSize:Int, p1:VectorFloat2, p2:VectorFloat2, f:(cell:MVectorInt2)->Void):Void {
+    function gridTraverse(cellSize:Int, p1:IVector2<Float>, p2:IVector2<Float>, f:(cell:IVector2<Int>)->Void):Void {
         var cell1 = convertWorldPointToCellCoords(p1);
         var cell2 = convertWorldPointToCellCoords(p2);
         var tDataX = gridTraverseInitStep(cellSize, cell1.x, p1.x, p2.x);
@@ -433,8 +433,8 @@ class World {
     function getCellsTouchedBySegment(seg:LineSegment) {
         var visited = new Map<Cell, Bool>();
         var cells = new Array<Cell>();
-        gridTraverse(cellSize, {x:seg.x1, y:seg.y1}, {x:seg.x2, y:seg.y2}, 
-        (cell:VectorInt2)->{
+        gridTraverse(cellSize, new VectorFloat2(seg.x1, seg.y1), new VectorFloat2(seg.x2, seg.y2), 
+        (cell:IVector2<Int>)->{
             if (!rows.exists(cell.y)) return;
             var row = rows[cell.y];
             if (!row.exists(cell.x)) return;
