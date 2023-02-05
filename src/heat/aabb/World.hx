@@ -571,10 +571,11 @@ class World {
         var rectBottomY = Math.max(goal.y+rect.height, rect.bottomY);
         var rectWidth = rectRightX-rectLeftX;
         var rectHeight = rectBottomY-rectTopY;
-        var rect = rectPool.get();
-        rect.pos.init(rectLeftX, rectTopY);
-        rect.dim.init(rectWidth, rectHeight);
-        var cellRect = convertWorldRectToCellCoords(rect);
+        var rangeRect = rectPool.get();
+        rangeRect.pos.init(rectLeftX, rectTopY);
+        rangeRect.dim.init(rectWidth, rectHeight);
+        var cellRect = convertWorldRectToCellCoords(rangeRect);
+        rectPool.put(rangeRect);
 
         // Find all items in all checked cells. Test for collisions against these and collect all the resulting collisions.
         var itemsInCellRect = getDictItemsInCellRect(cellRect);
@@ -745,6 +746,7 @@ class World {
                     case None: {
                         pointPool.put(nearestCorner);
                         rectPool.put(rectDiff);
+                        collisionPool.put(col);
                         return None;
                     }
                     case Some(segInt): {
@@ -765,6 +767,7 @@ class World {
             switch segInt {
                 case None: {
                     rectPool.put(rectDiff);
+                    collisionPool.put(col);
                     return None;
                 }
                 case Some(segInt): {
@@ -780,12 +783,17 @@ class World {
                     else {
                         rectSegmentIntersectionPool.put(segInt);
                         rectPool.put(rectDiff);
+                        collisionPool.put(col);
                         return None;
                     }
                     rectSegmentIntersectionPool.put(segInt);
                 }
             }
         }
+
+        col.movingRect.initFrom(rect1);
+        col.movingRect.pos.initFrom(col.touch);
+        col.otherRect.initFrom(rect2);
 
         rectPool.put(rectDiff);
     
