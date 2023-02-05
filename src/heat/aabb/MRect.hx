@@ -189,6 +189,7 @@ class MRect implements IRect {
         if (dest == null) dest = new MRect();
         dest.pos.init(r2.leftX-r1.rightX, r2.topY-r1.bottomY);
         dest.dim.init(r1.width+r2.width, r1.height+r2.height);
+        dest.offset.init();
         return dest;
     }
 
