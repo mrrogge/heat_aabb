@@ -1182,7 +1182,7 @@ class World {
     }
 
     
-    function defaultFilter(item:EntityId, other:EntityId):CollisionKind {
+    public function defaultFilter(item:EntityId, other:EntityId):CollisionKind {
         return SLIDE;
     }
 }
